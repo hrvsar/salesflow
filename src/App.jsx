@@ -1,0 +1,995 @@
+import { useState, useRef, useEffect } from "react";
+
+// ─── Supabase client (no npm needed — using REST API directly) ────────────────
+const SUPA_URL = "https://ptlfwojszcnfzsijkutg.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0bGZ3b2pzemNuZnpzaWprdXRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Nzg3MTQsImV4cCI6MjA4NzE1NDcxNH0.vPybKL7VPCBe1rBErmLpsQq3IvUoUnn2wLsVMqon7dc";
+
+// Auth helpers
+const authHeaders = (token) => ({
+  "Content-Type": "application/json",
+  "apikey": SUPA_KEY,
+  "Authorization": `Bearer ${token || SUPA_KEY}`,
+});
+
+async function sbAuth(action, body) {
+  const res = await fetch(`${SUPA_URL}/auth/v1/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPA_KEY },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+async function sbSelect(table, token, filter = "") {
+  const res = await fetch(`${SUPA_URL}/rest/v1/${table}?${filter}&order=created_at.asc`, {
+    headers: authHeaders(token),
+  });
+  return res.json();
+}
+
+async function sbInsert(table, token, data) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Prefer": "return=representation" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+async function sbUpdate(table, token, id, data) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(token), "Prefer": "return=representation" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+async function sbDelete(table, token, id) {
+  await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const STATUSES = [
+  { id:"todo",       label:"To Do",       color:"#64748B" },
+  { id:"inprogress", label:"In Progress", color:"#2563EB" },
+  { id:"done",       label:"Done",        color:"#16A34A" },
+];
+const PRIORITIES = {
+  high:   { label:"High",   color:"#DC2626" },
+  medium: { label:"Medium", color:"#D97706" },
+  low:    { label:"Low",    color:"#16A34A" },
+};
+const RETAILER_TYPES = ["Department Store","Specialty","Online","Boutique","Outlet"];
+const MKT_COLORS = ["#2563EB","#DC2626","#D97706","#7C3AED","#DB2777","#0D9488","#059669","#EA580C"];
+const MKT_FLAGS  = ["🇬🇧","🇫🇷","🇩🇪","🇮🇹","🇪🇸","🇺🇸","🇯🇵","🇨🇳","🇦🇺","🇧🇷","🇨🇦","🇰🇷","🇳🇱","🇧🇪","🇨🇭","🇦🇹","🇸🇪","🇳🇴","🇩🇰","🇵🇱","🌍","🌎","🌏"];
+
+// ─── Shared styles ────────────────────────────────────────────────────────────
+const inputSt  = { background:"#F8FAFC", border:"1px solid #E2E8F0", color:"#0F172A", borderRadius:8, padding:"8px 11px", fontFamily:"inherit", fontSize:13, outline:"none" };
+const labelSt  = { fontSize:10, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1.1, display:"block", marginBottom:4 };
+const btnPri   = (c) => ({ background:c, border:"none", color:"#fff", borderRadius:9, padding:"9px 18px", cursor:"pointer", fontWeight:800, fontSize:13, fontFamily:"inherit" });
+const btnGhost = { background:"#F1F5F9", border:"none", color:"#64748B", borderRadius:9, padding:"9px 14px", cursor:"pointer", fontWeight:600, fontSize:13, fontFamily:"inherit" };
+
+// ─── UI Helpers ───────────────────────────────────────────────────────────────
+function StatusPill({ status }) {
+  const s = STATUSES.find(x=>x.id===status)||STATUSES[0];
+  return <span style={{ background:s.color+"22", color:s.color, borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>{s.label}</span>;
+}
+function PriorityDot({ priority }) {
+  const p = PRIORITIES[priority]||PRIORITIES.low;
+  return <span style={{ display:"flex", alignItems:"center", gap:4 }}><span style={{ width:7, height:7, borderRadius:"50%", background:p.color, display:"inline-block", flexShrink:0 }}/><span style={{ fontSize:11, color:p.color, fontWeight:600 }}>{p.label}</span></span>;
+}
+function ProgressBar({ value, color }) {
+  return <div style={{ height:4, background:"#E2E8F0", borderRadius:4, overflow:"hidden", width:"100%" }}><div style={{ height:"100%", width:`${value}%`, background:color, borderRadius:4, transition:"width 0.4s" }}/></div>;
+}
+function Chevron({ open }) {
+  return <span style={{ color:"#CBD5E1", fontSize:11, display:"inline-block", transition:"transform 0.2s", transform:open?"rotate(90deg)":"rotate(0deg)" }}>▶</span>;
+}
+function Spinner() {
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:40 }}>
+      <div style={{ width:32, height:32, border:"3px solid #E2E8F0", borderTop:"3px solid #2563EB", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+// ─── Login / Signup Screen ────────────────────────────────────────────────────
+function AuthScreen({ onLogin }) {
+  const [mode,     setMode]     = useState("login"); // login | signup
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [success,  setSuccess]  = useState("");
+
+  const submit = async () => {
+    if (!email.trim() || !password.trim()) { setError("Please enter email and password."); return; }
+    setLoading(true); setError(""); setSuccess("");
+    const action = mode === "login" ? "token?grant_type=password" : "signup";
+    const data = await sbAuth(action, { email: email.trim(), password });
+    setLoading(false);
+    if (data.error || data.msg) {
+      setError(data.error_description || data.msg || "Something went wrong.");
+    } else if (mode === "signup" && !data.access_token) {
+      setSuccess("Account created! Check your email to confirm, then log in.");
+      setMode("login");
+    } else if (data.access_token) {
+      onLogin({ token: data.access_token, email: data.user?.email, id: data.user?.id });
+    } else {
+      setError("Unexpected response. Please try again.");
+    }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#0F172A 0%,#1E3A5F 60%,#0D9488 100%)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'DM Sans','Segoe UI',sans-serif" }}>
+      <div style={{ background:"#fff", borderRadius:20, padding:"40px 36px", width:380, boxShadow:"0 40px 100px rgba(0,0,0,0.35)" }}>
+        {/* Logo */}
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:28 }}>
+          <div style={{ width:42, height:42, borderRadius:12, background:"linear-gradient(135deg,#2563EB,#7C3AED)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>💼</div>
+          <div>
+            <div style={{ fontWeight:900, fontSize:20, color:"#0F172A", letterSpacing:-0.5 }}>SalesFlow</div>
+            <div style={{ fontSize:11, color:"#94A3B8", letterSpacing:0.3 }}>Sales Task Manager</div>
+          </div>
+        </div>
+
+        <div style={{ fontWeight:800, fontSize:18, color:"#0F172A", marginBottom:4 }}>
+          {mode === "login" ? "Welcome back" : "Create account"}
+        </div>
+        <div style={{ fontSize:13, color:"#94A3B8", marginBottom:24 }}>
+          {mode === "login" ? "Sign in to your workspace" : "Set up your SalesFlow workspace"}
+        </div>
+
+        {error   && <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", color:"#DC2626", borderRadius:10, padding:"10px 14px", fontSize:13, marginBottom:16 }}>{error}</div>}
+        {success && <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", color:"#16A34A", borderRadius:10, padding:"10px 14px", fontSize:13, marginBottom:16 }}>{success}</div>}
+
+        <div style={{ marginBottom:14 }}>
+          <label style={labelSt}>Email</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
+            placeholder="you@company.com" style={{...inputSt, width:"100%", boxSizing:"border-box"}} />
+        </div>
+        <div style={{ marginBottom:24 }}>
+          <label style={labelSt}>Password</label>
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
+            placeholder="••••••••" style={{...inputSt, width:"100%", boxSizing:"border-box"}} />
+        </div>
+
+        <button onClick={submit} disabled={loading} style={{ ...btnPri("#2563EB"), width:"100%", padding:"13px", fontSize:15, opacity:loading?0.7:1 }}>
+          {loading ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
+        </button>
+
+        <div style={{ textAlign:"center", marginTop:18, fontSize:13, color:"#64748B" }}>
+          {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+          <span onClick={()=>{setMode(mode==="login"?"signup":"login");setError("");setSuccess("");}}
+            style={{ color:"#2563EB", fontWeight:700, cursor:"pointer" }}>
+            {mode === "login" ? "Sign up" : "Sign in"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Lightbox ─────────────────────────────────────────────────────────────────
+function Lightbox({ photos, startIdx, onClose }) {
+  const [idx, setIdx] = useState(startIdx);
+  const prev = () => setIdx(i=>(i-1+photos.length)%photos.length);
+  const next = () => setIdx(i=>(i+1)%photos.length);
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:4000 }}>
+      <div onClick={e=>e.stopPropagation()} style={{ position:"relative", maxWidth:"90vw", maxHeight:"90vh", display:"flex", flexDirection:"column", alignItems:"center", gap:12 }}>
+        <img src={photos[idx].url} alt={photos[idx].caption||"Photo"} style={{ maxWidth:"88vw", maxHeight:"78vh", borderRadius:12, objectFit:"contain", boxShadow:"0 24px 60px rgba(0,0,0,0.6)" }} />
+        {photos[idx].caption && <div style={{ color:"rgba(255,255,255,0.7)", fontSize:13 }}>{photos[idx].caption}</div>}
+        <div style={{ color:"rgba(255,255,255,0.4)", fontSize:12 }}>{idx+1} / {photos.length}</div>
+        {photos.length > 1 && <>
+          <button onClick={prev} style={{ position:"absolute", left:-52, top:"40%", background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:"50%", width:40, height:40, cursor:"pointer", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+          <button onClick={next} style={{ position:"absolute", right:-52, top:"40%", background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:"50%", width:40, height:40, cursor:"pointer", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+        </>}
+        <button onClick={onClose} style={{ position:"absolute", top:-16, right:-16, background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:"50%", width:32, height:32, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Photo Section ────────────────────────────────────────────────────────────
+function PhotoSection({ photos, setPhotos, color }) {
+  const [lightboxIdx, setLightboxIdx] = useState(null);
+  const fileRef = useRef(null);
+  const handleFiles = (files) => {
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = (e) => setPhotos(prev=>[...prev,{ id: Math.random().toString(36).slice(2), url:e.target.result, caption:"", uploadedAt:new Date().toLocaleDateString() }]);
+      reader.readAsDataURL(file);
+    });
+  };
+  const onDrop = (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); };
+  return (
+    <div style={{ marginBottom:18 }}>
+      <label style={{...labelSt, marginBottom:10}}>Photos ({photos.length})</label>
+      <div onDrop={onDrop} onDragOver={e=>e.preventDefault()} onClick={()=>fileRef.current.click()}
+        style={{ border:"2px dashed #E2E8F0", borderRadius:10, padding:"16px", textAlign:"center", cursor:"pointer", marginBottom:10, background:"#FAFBFC" }}
+        onMouseEnter={e=>{e.currentTarget.style.borderColor=color;}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#E2E8F0";}}>
+        <div style={{ fontSize:22, marginBottom:3 }}>📷</div>
+        <div style={{ fontSize:12, fontWeight:700, color:"#64748B" }}>Click or drag & drop photos</div>
+        <div style={{ fontSize:11, color:"#94A3B8", marginTop:2 }}>Shelf shots, planograms, in-store photos</div>
+        <input ref={fileRef} type="file" accept="image/*" multiple onChange={e=>handleFiles(e.target.files)} style={{ display:"none" }} />
+      </div>
+      {photos.length > 0 && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+          {photos.map((photo,i) => (
+            <div key={photo.id} style={{ position:"relative", borderRadius:9, overflow:"hidden", border:"1px solid #E2E8F0" }}>
+              <img src={photo.url} alt="task" onClick={()=>setLightboxIdx(i)} style={{ width:"100%", aspectRatio:"4/3", objectFit:"cover", cursor:"pointer", display:"block" }} />
+              <input value={photo.caption} onChange={e=>setPhotos(prev=>prev.map(p=>p.id===photo.id?{...p,caption:e.target.value}:p))}
+                placeholder="Caption…" style={{ width:"100%", boxSizing:"border-box", border:"none", borderTop:"1px solid #E2E8F0", padding:"4px 8px", fontSize:11, color:"#374151", background:"#fff", outline:"none", fontFamily:"inherit" }} />
+              <button onClick={()=>setPhotos(prev=>prev.filter(p=>p.id!==photo.id))} style={{ position:"absolute", top:4, right:4, background:"rgba(0,0,0,0.55)", border:"none", color:"#fff", borderRadius:"50%", width:20, height:20, cursor:"pointer", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              <div style={{ position:"absolute", top:4, left:4, background:"rgba(0,0,0,0.45)", color:"#fff", fontSize:9, borderRadius:4, padding:"2px 5px", fontWeight:600 }}>{photo.uploadedAt}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {lightboxIdx !== null && <Lightbox photos={photos} startIdx={lightboxIdx} onClose={()=>setLightboxIdx(null)} />}
+    </div>
+  );
+}
+
+// ─── Task Modal ───────────────────────────────────────────────────────────────
+function TaskModal({ task, store, retailer, market, onClose, onSave, onDelete }) {
+  const [t, setT]         = useState({ ...task, photos: task.photos || [], comments: task.comments || [] });
+  const [comment, setComment] = useState("");
+  const [saving,  setSaving]  = useState(false);
+  const addComment = () => { if (!comment.trim()) return; setT(p=>({...p,comments:[...p.comments,comment.trim()]})); setComment(""); };
+  const setPhotos  = (fn) => setT(p=>({...p,photos:typeof fn==="function"?fn(p.photos):fn}));
+  const handleSave = async () => { setSaving(true); await onSave(t); setSaving(false); onClose(); };
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:18, width:560, maxHeight:"88vh", overflowY:"auto", boxShadow:"0 32px 80px rgba(0,0,0,0.22)" }}>
+        <div style={{ background:market.color, padding:"22px 26px 18px", borderRadius:"18px 18px 0 0", position:"sticky", top:0, zIndex:1 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div style={{ flex:1 }}>
+              <div style={{ color:"rgba(255,255,255,0.75)", fontSize:11, fontWeight:700, marginBottom:6 }}>
+                {market.flag} {market.name} › {retailer.name}{store?` › ${store.name}`:" · Account-level"}
+              </div>
+              <input value={t.title} onChange={e=>setT({...t,title:e.target.value})}
+                style={{ background:"transparent", border:"none", outline:"none", fontSize:19, fontWeight:800, color:"#fff", fontFamily:"inherit", width:"100%" }} />
+            </div>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", color:"#fff", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:15, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginLeft:12 }}>✕</button>
+          </div>
+        </div>
+        <div style={{ padding:"22px 26px" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:18 }}>
+            <div><label style={labelSt}>Status</label>
+              <select value={t.status} onChange={e=>setT({...t,status:e.target.value})} style={{...inputSt,width:"100%"}}>
+                {STATUSES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </div>
+            <div><label style={labelSt}>Priority</label>
+              <select value={t.priority} onChange={e=>setT({...t,priority:e.target.value})} style={{...inputSt,width:"100%"}}>
+                {Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div><label style={labelSt}>Due Date</label>
+              <input type="date" value={t.due||""} onChange={e=>setT({...t,due:e.target.value})} style={{...inputSt,width:"100%",boxSizing:"border-box"}} />
+            </div>
+          </div>
+          <div style={{ marginBottom:18 }}>
+            <label style={labelSt}>Notes</label>
+            <textarea value={t.description||""} onChange={e=>setT({...t,description:e.target.value})} rows={3}
+              style={{...inputSt,width:"100%",boxSizing:"border-box",resize:"vertical",lineHeight:1.6}} />
+          </div>
+          <PhotoSection photos={t.photos} setPhotos={setPhotos} color={market.color} />
+          <div style={{ marginBottom:18 }}>
+            <label style={{...labelSt,marginBottom:10}}>Comments ({t.comments.length})</label>
+            {t.comments.map((c,i)=>(
+              <div key={i} style={{ display:"flex", gap:8, marginBottom:8, alignItems:"flex-start" }}>
+                <div style={{ width:26, height:26, borderRadius:"50%", background:market.color, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800, flexShrink:0 }}>U</div>
+                <div style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:8, padding:"7px 11px", fontSize:13, color:"#374151", flex:1 }}>{c}</div>
+              </div>
+            ))}
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <input value={comment} onChange={e=>setComment(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addComment()}
+                placeholder="Write a comment…" style={{...inputSt,flex:1}} />
+              <button onClick={addComment} style={btnPri(market.color)}>Post</button>
+            </div>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <button onClick={()=>{onDelete(task.id);onClose();}} style={{...btnGhost,color:"#DC2626",background:"#FEF2F2"}}>Delete</button>
+            <button onClick={handleSave} disabled={saving} style={{...btnPri(market.color),opacity:saving?0.7:1}}>
+              {saving?"Saving…":"Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Task Inline ──────────────────────────────────────────────────────────
+function AddTaskInline({ storeId, retailerId, color, onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ title:"", status:"todo", priority:"medium", due:"" });
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!f.title.trim()) return;
+    setSaving(true);
+    await onAdd({ ...f, storeId, retailerId, description:"", comments:[], photos:[] });
+    setF({ title:"", status:"todo", priority:"medium", due:"" });
+    setSaving(false); setOpen(false);
+  };
+  if (!open) return (
+    <div onClick={()=>setOpen(true)} style={{ padding:"9px 16px", fontSize:12, color:"#94A3B8", cursor:"pointer", borderTop:"1px solid #F1F5F9", display:"flex", alignItems:"center", gap:6 }}
+      onMouseEnter={e=>e.currentTarget.style.color=color} onMouseLeave={e=>e.currentTarget.style.color="#94A3B8"}>
+      <span style={{ fontWeight:700, fontSize:15 }}>+</span> Add task
+    </div>
+  );
+  return (
+    <div style={{ padding:"10px 14px", borderTop:"1px solid #E2E8F0", background:"#F8FAFC", display:"flex", flexWrap:"wrap", gap:6, alignItems:"flex-end" }}>
+      <input value={f.title} onChange={e=>setF({...f,title:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()}
+        placeholder="Task title…" autoFocus style={{...inputSt,flex:"1 1 150px"}} />
+      <select value={f.status} onChange={e=>setF({...f,status:e.target.value})} style={inputSt}>
+        {STATUSES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+      </select>
+      <select value={f.priority} onChange={e=>setF({...f,priority:e.target.value})} style={inputSt}>
+        {Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+      </select>
+      <input type="date" value={f.due} onChange={e=>setF({...f,due:e.target.value})} style={inputSt}/>
+      <button onClick={submit} disabled={saving} style={{...btnPri(color),opacity:saving?0.7:1}}>{saving?"Adding…":"Add"}</button>
+      <button onClick={()=>setOpen(false)} style={btnGhost}>✕</button>
+    </div>
+  );
+}
+
+// ─── Account Task List (retailer-level tasks) ─────────────────────────────────
+function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
+  const [open,   setOpen]   = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [f,      setF]      = useState({ title:"", status:"todo", priority:"medium", due:"" });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!f.title.trim()) return;
+    setSaving(true);
+    await onAddTask({ ...f, retailerId:retailer.id, storeId:null, description:"", comments:[], photos:[] });
+    setF({ title:"", status:"todo", priority:"medium", due:"" });
+    setSaving(false); setAdding(false);
+  };
+
+  return (
+    <div style={{ marginBottom:10 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 2px 6px" }}>
+        <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", flex:1 }}>
+          <Chevron open={open} />
+          <span style={{ fontSize:11, fontWeight:800, color:"#64748B", textTransform:"uppercase", letterSpacing:0.8 }}>Account Tasks</span>
+          <span style={{ fontSize:10, color:"#94A3B8", background:"#E2E8F0", borderRadius:20, padding:"0 7px" }}>{tasks.length}</span>
+        </div>
+        <button onClick={()=>setAdding(a=>!a)} style={{ fontSize:11, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, borderRadius:7, padding:"3px 10px", cursor:"pointer", fontWeight:700, fontFamily:"inherit" }}>+ Task</button>
+      </div>
+      {open && (
+        <div style={{ border:"1px solid #E2E8F0", borderRadius:10, overflow:"hidden", background:"#fff" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"6px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+            {["Task","Status","Priority","Due",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+          </div>
+          {tasks.length===0&&!adding&&<div style={{ padding:"12px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No account-level tasks yet</div>}
+          {tasks.map((task,i)=>(
+            <div key={task.id} onClick={()=>onTaskClick(task)}
+              style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"10px 14px", cursor:"pointer", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s" }}
+              onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+              <span style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none" }}>{task.title}</span>
+              <StatusPill status={task.status} />
+              <PriorityDot priority={task.priority} />
+              <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
+              <span style={{ fontSize:11, color:"#94A3B8" }}>{(task.photos||[]).length>0&&`📷${task.photos.length}`}</span>
+            </div>
+          ))}
+          {adding && (
+            <div style={{ padding:"10px 14px", borderTop:"1px solid #E2E8F0", background:"#F8FAFC", display:"flex", flexWrap:"wrap", gap:6, alignItems:"flex-end" }}>
+              <input value={f.title} onChange={e=>setF({...f,title:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()}
+                placeholder="Task title…" autoFocus style={{...inputSt,flex:"1 1 150px"}}/>
+              <select value={f.status} onChange={e=>setF({...f,status:e.target.value})} style={inputSt}>
+                {STATUSES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+              <select value={f.priority} onChange={e=>setF({...f,priority:e.target.value})} style={inputSt}>
+                {Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+              <input type="date" value={f.due} onChange={e=>setF({...f,due:e.target.value})} style={inputSt}/>
+              <button onClick={submit} disabled={saving} style={{...btnPri(market.color),opacity:saving?0.7:1}}>{saving?"…":"Add"}</button>
+              <button onClick={()=>setAdding(false)} style={btnGhost}>✕</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Store Block ──────────────────────────────────────────────────────────────
+function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTask }) {
+  const [open, setOpen] = useState(true);
+  const myTasks = tasks.filter(t=>t.store_id===store.id||t.storeId===store.id);
+  const done = myTasks.filter(t=>t.status==="done").length;
+  const pct  = myTasks.length?Math.round(done/myTasks.length*100):0;
+  return (
+    <div style={{ marginBottom:8 }}>
+      <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 14px", background:"#fff", border:"1px solid #E2E8F0", borderRadius:open?"10px 10px 0 0":"10px", cursor:"pointer", userSelect:"none", borderLeft:`3px solid ${market.color}88` }}>
+        <span style={{ fontSize:13 }}>🏬</span>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:700, fontSize:13, color:"#0F172A", marginBottom:2 }}>{store.name}</div>
+          {store.address&&<div style={{ fontSize:11, color:"#94A3B8" }}>{store.address}</div>}
+        </div>
+        <span style={{ fontSize:11, color:"#94A3B8", marginRight:6 }}>{done}/{myTasks.length} done</span>
+        <div style={{ width:50 }}><ProgressBar value={pct} color={market.color}/></div>
+        <Chevron open={open}/>
+      </div>
+      {open && (
+        <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 10px 10px", overflow:"hidden", background:"#fff" }}>
+          {view==="list" ? (
+            <>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"6px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                {["Task","Status","Priority","Due",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+              </div>
+              {myTasks.length===0&&<div style={{ padding:"14px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No tasks yet</div>}
+              {myTasks.map((task,i)=>(
+                <div key={task.id} onClick={()=>onTaskClick(task)}
+                  style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"10px 14px", cursor:"pointer", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s" }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                  <span style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none" }}>{task.title}</span>
+                  <StatusPill status={task.status}/>
+                  <PriorityDot priority={task.priority}/>
+                  <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
+                  <span style={{ fontSize:11, color:"#94A3B8" }}>{(task.photos||[]).length>0&&`📷${task.photos.length}`}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div style={{ padding:12, background:"#FAFBFC" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+                {STATUSES.map(status=>{
+                  const col = myTasks.filter(t=>t.status===status.id);
+                  return (
+                    <div key={status.id}>
+                      <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:7 }}>
+                        <span style={{ width:7, height:7, borderRadius:"50%", background:status.color, display:"inline-block" }}/>
+                        <span style={{ fontSize:10, fontWeight:800, color:"#64748B", textTransform:"uppercase", letterSpacing:0.8 }}>{status.label}</span>
+                        <span style={{ marginLeft:"auto", fontSize:10, color:"#94A3B8", background:"#E2E8F0", borderRadius:20, padding:"0 6px" }}>{col.length}</span>
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                        {col.map(task=>(
+                          <div key={task.id} onClick={()=>onTaskClick(task)}
+                            style={{ background:"#fff", borderRadius:8, padding:"9px 11px", cursor:"pointer", boxShadow:"0 1px 3px rgba(0,0,0,0.07)", borderTop:`2px solid ${market.color}`, transition:"box-shadow 0.15s" }}
+                            onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.12)"} onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.07)"}>
+                            <div style={{ fontWeight:700, fontSize:12, color:task.status==="done"?"#CBD5E1":"#1E293B", marginBottom:5, textDecoration:task.status==="done"?"line-through":"none" }}>{task.title}</div>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                              <PriorityDot priority={task.priority}/>
+                              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                {(task.photos||[]).length>0&&<span style={{ fontSize:10, color:"#94A3B8" }}>📷{task.photos.length}</span>}
+                                {task.due&&<span style={{ fontSize:10, color:"#94A3B8" }}>{task.due}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {col.length===0&&<div style={{ border:"2px dashed #E2E8F0", borderRadius:7, padding:8, textAlign:"center", color:"#CBD5E1", fontSize:11 }}>Empty</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <AddTaskInline storeId={store.id} retailerId={retailer.id} color={market.color} onAdd={onAddTask}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Retailer Block ───────────────────────────────────────────────────────────
+function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore }) {
+  const [open,         setOpen]         = useState(true);
+  const [addingStore,  setAddingStore]  = useState(false);
+  const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
+  const [savingStore,  setSavingStore]  = useState(false);
+
+  const myStores     = stores.filter(s=>(s.retailer_id||s.retailerId)===retailer.id);
+  const allMyTasks   = tasks.filter(t=>(t.retailer_id||t.retailerId)===retailer.id);
+  const accountTasks = allMyTasks.filter(t=>!t.store_id&&!t.storeId);
+  const storeTasks   = allMyTasks.filter(t=>!!(t.store_id||t.storeId));
+  const done = allMyTasks.filter(t=>t.status==="done").length;
+  const pct  = allMyTasks.length?Math.round(done/allMyTasks.length*100):0;
+
+  const submitStore = async () => {
+    if (!storeForm.name.trim()) return;
+    setSavingStore(true);
+    await onAddStore({ ...storeForm, retailerId:retailer.id });
+    setStoreForm({ name:"", address:"" }); setSavingStore(false); setAddingStore(false);
+  };
+
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 16px", background:"#fff", border:"1px solid #E2E8F0", borderRadius:open?"12px 12px 0 0":"12px", borderLeft:`3px solid ${market.color}`, userSelect:"none" }}>
+        <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, flex:1, cursor:"pointer" }}>
+          <Chevron open={open}/>
+          <span style={{ fontSize:16 }}>🏢</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:800, fontSize:14, color:"#0F172A" }}>{retailer.name}</div>
+            <div style={{ fontSize:11, color:"#94A3B8", marginTop:1 }}>{myStores.length} store{myStores.length!==1?"s":""} · {allMyTasks.length} tasks</div>
+          </div>
+          <span style={{ fontSize:11, background:"#F1F5F9", color:"#64748B", borderRadius:6, padding:"1px 8px", fontWeight:600, marginRight:6 }}>{retailer.type}</span>
+          <span style={{ fontSize:11, color:"#94A3B8", marginRight:8 }}>{done}/{allMyTasks.length} done</span>
+          <div style={{ width:60 }}><ProgressBar value={pct} color={market.color}/></div>
+        </div>
+        <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>
+      </div>
+      {open && (
+        <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"12px", background:"#F8FAFC" }}>
+          <AccountTaskList tasks={accountTasks} market={market} retailer={retailer} onTaskClick={onTaskClick} onAddTask={onAddTask}/>
+          {addingStore && (
+            <div style={{ background:"#fff", border:"1px solid #E2E8F0", borderRadius:10, padding:"13px 14px", marginBottom:10, marginTop:4, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+              <div style={{ flex:"1 1 160px" }}>
+                <label style={labelSt}>Store Name *</label>
+                <input value={storeForm.name} onChange={e=>setStoreForm({...storeForm,name:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submitStore()}
+                  placeholder="e.g. Harrods Knightsbridge" autoFocus style={{...inputSt,width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{ flex:"1 1 160px" }}>
+                <label style={labelSt}>Address (optional)</label>
+                <input value={storeForm.address} onChange={e=>setStoreForm({...storeForm,address:e.target.value})}
+                  placeholder="e.g. 87 Brompton Rd" style={{...inputSt,width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <button onClick={submitStore} disabled={savingStore} style={{...btnPri(market.color),opacity:savingStore?0.7:1}}>{savingStore?"Saving…":"Add Store"}</button>
+              <button onClick={()=>setAddingStore(false)} style={btnGhost}>✕</button>
+            </div>
+          )}
+          {myStores.length===0&&!addingStore&&(
+            <div style={{ border:"2px dashed #E2E8F0", borderRadius:10, padding:"14px", textAlign:"center", color:"#CBD5E1", fontSize:12, marginTop:4 }}>
+              No stores yet — click <strong style={{ color:market.color }}>+ Store</strong> to add one
+            </div>
+          )}
+          {myStores.map(store=>(
+            <div key={store.id} style={{ marginTop:8 }}>
+              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask}/>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Market Section ───────────────────────────────────────────────────────────
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer }) {
+  const [open,       setOpen]       = useState(true);
+  const [addingRet,  setAddingRet]  = useState(false);
+  const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
+  const [savingRet,  setSavingRet]  = useState(false);
+
+  const myRets   = retailers.filter(r=>(r.market_id||r.marketId)===market.id);
+  const myStores = stores.filter(s=>myRets.some(r=>r.id===(s.retailer_id||s.retailerId)));
+  const myTasks  = tasks.filter(t=>myRets.some(r=>r.id===(t.retailer_id||t.retailerId)));
+  const done     = myTasks.filter(t=>t.status==="done").length;
+
+  const submitRet = async () => {
+    if (!retForm.name.trim()) return;
+    setSavingRet(true);
+    await onAddRetailer({ ...retForm, marketId:market.id });
+    setRetForm({ name:"", type:"Department Store" }); setSavingRet(false); setAddingRet(false);
+  };
+
+  return (
+    <div style={{ marginBottom:28 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+        <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", flex:1 }}>
+          <div style={{ width:38, height:38, borderRadius:11, background:market.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0, boxShadow:`0 4px 10px ${market.color}44` }}>{market.flag}</div>
+          <div>
+            <div style={{ fontWeight:900, fontSize:17, color:"#0F172A", letterSpacing:-0.3 }}>{market.name}</div>
+            <div style={{ fontSize:11, color:"#94A3B8" }}>{myRets.length} retailers · {myStores.length} stores · {myTasks.length} tasks · {done} done</div>
+          </div>
+          <span style={{ color:"#CBD5E1", fontSize:12, marginLeft:4, display:"inline-block", transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
+        </div>
+        <button onClick={()=>setAddingRet(true)} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>
+      </div>
+      {open && (
+        <div style={{ paddingLeft:48 }}>
+          {addingRet && (
+            <div style={{ background:"#fff", border:"1px solid #E2E8F0", borderRadius:12, padding:"13px 16px", marginBottom:10, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+              <div style={{ flex:"1 1 160px" }}>
+                <label style={labelSt}>Retailer Name</label>
+                <input value={retForm.name} onChange={e=>setRetForm({...retForm,name:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submitRet()}
+                  placeholder="e.g. Harrods" autoFocus style={{...inputSt,width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <label style={labelSt}>Type</label>
+                <select value={retForm.type} onChange={e=>setRetForm({...retForm,type:e.target.value})} style={inputSt}>
+                  {RETAILER_TYPES.map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <button onClick={submitRet} disabled={savingRet} style={{...btnPri(market.color),opacity:savingRet?0.7:1}}>{savingRet?"Saving…":"Add"}</button>
+              <button onClick={()=>setAddingRet(false)} style={btnGhost}>✕</button>
+            </div>
+          )}
+          {myRets.length===0&&!addingRet&&(
+            <div style={{ border:"2px dashed #E2E8F0", borderRadius:12, padding:20, textAlign:"center", color:"#CBD5E1", fontSize:13 }}>
+              No retailers yet — click "+ Retailer" to add one
+            </div>
+          )}
+          {myRets.map(ret=>(
+            <RetailerBlock key={ret.id} retailer={ret} market={market} stores={stores} tasks={tasks}
+              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer}/>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Add Market Modal ─────────────────────────────────────────────────────────
+function AddMarketModal({ onClose, onAdd }) {
+  const [name, setName] = useState("");
+  const [flag, setFlag] = useState("🇬🇧");
+  const [color,setColor]= useState(MKT_COLORS[0]);
+  const [saving,setSaving]=useState(false);
+  const submit = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    await onAdd({ name:name.trim(), flag, color });
+    onClose();
+  };
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.45)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, backdropFilter:"blur(4px)" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:18, padding:28, width:400, boxShadow:"0 32px 80px rgba(0,0,0,0.18)" }}>
+        <div style={{ fontWeight:900, fontSize:18, color:"#0F172A", marginBottom:18 }}>Add Market</div>
+        <div style={{ marginBottom:14 }}>
+          <label style={labelSt}>Market Name</label>
+          <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
+            placeholder="e.g. Italy" autoFocus style={{...inputSt,width:"100%",boxSizing:"border-box"}}/>
+        </div>
+        <div style={{ marginBottom:16 }}>
+          <label style={labelSt}>Flag</label>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+            {MKT_FLAGS.map(f=>(
+              <button key={f} onClick={()=>setFlag(f)} style={{ background:flag===f?"#EFF6FF":"#F8FAFC", border:`2px solid ${flag===f?"#2563EB":"#E2E8F0"}`, borderRadius:7, padding:"5px 7px", cursor:"pointer", fontSize:17 }}>{f}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom:22 }}>
+          <label style={labelSt}>Colour</label>
+          <div style={{ display:"flex", gap:8 }}>
+            {MKT_COLORS.map(c=>(
+              <button key={c} onClick={()=>setColor(c)} style={{ width:28, height:28, borderRadius:"50%", background:c, border:`3px solid ${color===c?"#0F172A":"transparent"}`, cursor:"pointer" }}/>
+            ))}
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:9 }}>
+          <button onClick={onClose} style={{...btnGhost,flex:1}}>Cancel</button>
+          <button onClick={submit} disabled={saving} style={{...btnPri("#0F172A"),flex:2,fontSize:14,opacity:saving?0.7:1}}>{saving?"Adding…":"Add Market"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout }) {
+  return (
+    <div style={{ width:210, minWidth:210, flexShrink:0, background:"#0F172A", display:"flex", flexDirection:"column", height:"100%", overflowY:"auto" }}>
+      <div style={{ padding:"18px 16px 16px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", gap:9 }}>
+        <div style={{ width:32, height:32, borderRadius:9, background:"linear-gradient(135deg,#2563EB,#7C3AED)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>💼</div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontWeight:900, fontSize:14, color:"#F8FAFC", letterSpacing:-0.3 }}>SalesFlow</div>
+          <div style={{ fontSize:9, color:"#475569", letterSpacing:0.5, textTransform:"uppercase", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{userEmail}</div>
+        </div>
+      </div>
+      <div style={{ padding:"14px 16px 6px", fontSize:9, color:"#334155", letterSpacing:2, fontWeight:800, textTransform:"uppercase" }}>Markets</div>
+      <NavItem label="All Markets" icon="🌐" count={tasks.length} active={!selected} color="#2563EB" onClick={()=>onSelect(null)}/>
+      {markets.map(m=>{
+        const myRets   = retailers.filter(r=>(r.market_id||r.marketId)===m.id);
+        const myStores = stores.filter(s=>myRets.some(r=>r.id===(s.retailer_id||s.retailerId)));
+        const cnt      = tasks.filter(t=>myRets.some(r=>r.id===(t.retailer_id||t.retailerId))).length;
+        return <NavItem key={m.id} label={m.name} icon={m.flag} count={cnt} active={selected===m.id} color={m.color} onClick={()=>onSelect(m.id)}/>;
+      })}
+      <div style={{ marginTop:"auto", padding:"12px 10px", borderTop:"1px solid #1E293B", display:"flex", flexDirection:"column", gap:6 }}>
+        <button onClick={onAddMarket} style={{ width:"100%", background:"none", border:"2px dashed #1E293B", color:"#475569", borderRadius:9, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor="#2563EB";e.currentTarget.style.color="#2563EB";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
+          + Add Market
+        </button>
+        <button onClick={onLogout} style={{ width:"100%", background:"none", border:"none", color:"#475569", borderRadius:9, padding:"7px", cursor:"pointer", fontSize:11, fontFamily:"inherit" }}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NavItem({ label, icon, count, active, color, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 14px", cursor:"pointer", margin:"1px 6px", borderRadius:8,
+        background:active?"#1E293B":hov?"#172033":"transparent",
+        borderLeft:`3px solid ${active?color:"transparent"}`, transition:"all 0.12s" }}>
+      <span style={{ fontSize:15 }}>{icon}</span>
+      <span style={{ fontSize:12, fontWeight:active?800:500, color:active?"#F8FAFC":"#94A3B8", flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{label}</span>
+      <span style={{ fontSize:10, color:"#475569", background:"#1E293B", borderRadius:20, padding:"0 7px", flexShrink:0 }}>{count}</span>
+    </div>
+  );
+}
+
+// ─── Stats Strip ──────────────────────────────────────────────────────────────
+function StatsStrip({ tasks }) {
+  const total  = tasks.length;
+  const done   = tasks.filter(t=>t.status==="done").length;
+  const inprog = tasks.filter(t=>t.status==="inprogress").length;
+  const high   = tasks.filter(t=>t.priority==="high"&&t.status!=="done").length;
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:20 }}>
+      {[
+        { l:"Total Tasks",   v:total,               c:"#0F172A" },
+        { l:"In Progress",   v:inprog,              c:"#2563EB" },
+        { l:"Completed",     v:`${done} / ${total}`, c:"#16A34A" },
+        { l:"High Priority", v:high,                c:"#DC2626" },
+      ].map(s=>(
+        <div key={s.l} style={{ background:"#fff", borderRadius:10, padding:"11px 14px", border:"1px solid #E2E8F0", borderTop:`3px solid ${s.c}` }}>
+          <div style={{ fontSize:20, fontWeight:900, color:s.c, letterSpacing:-0.5 }}>{s.v}</div>
+          <div style={{ fontSize:10, color:"#94A3B8", fontWeight:700, marginTop:1 }}>{s.l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Weekly Report Modal ──────────────────────────────────────────────────────
+function WeeklyReportModal({ markets, retailers, stores, tasks, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [report,  setReport]  = useState(null);
+  const [error,   setError]   = useState(null);
+  const [copied,  setCopied]  = useState(false);
+
+  const buildPrompt = () => {
+    const week = new Date().toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" });
+    const marketSummaries = markets.map(market => {
+      const myRets   = retailers.filter(r=>(r.market_id||r.marketId)===market.id);
+      const myStores = stores.filter(s=>myRets.some(r=>r.id===(s.retailer_id||s.retailerId)));
+      const myTasks  = tasks.filter(t=>myRets.some(r=>r.id===(t.retailer_id||t.retailerId)));
+      const total=myTasks.length, done=myTasks.filter(t=>t.status==="done").length;
+      const inprogress=myTasks.filter(t=>t.status==="inprogress").length;
+      const todo=myTasks.filter(t=>t.status==="todo").length;
+      const highPri=myTasks.filter(t=>t.priority==="high"&&t.status!=="done").length;
+      const overdue=myTasks.filter(t=>t.due&&new Date(t.due)<new Date()&&t.status!=="done").length;
+      const retailerDetails = myRets.map(ret => {
+        const retTasks  = myTasks.filter(t=>(t.retailer_id||t.retailerId)===ret.id);
+        const retStores = myStores.filter(s=>(s.retailer_id||s.retailerId)===ret.id);
+        const taskLines = retTasks.map(t=>{
+          const store = retStores.find(s=>s.id===(t.store_id||t.storeId));
+          const loc   = store?` [${store.name}]`:" [Account-level]";
+          const cmt   = (t.comments||[]).length>0?` — "${t.comments.slice(-1)[0]}"` :"";
+          return `    • ${t.title}${loc} | ${t.status} | ${t.priority} | Due:${t.due||"none"}${cmt}`;
+        }).join("\n");
+        return `  ${ret.name} (${ret.type}) — ${retStores.length} stores, ${retTasks.length} tasks:\n${taskLines||"    No tasks yet."}`;
+      }).join("\n\n");
+      return `MARKET: ${market.flag} ${market.name}\nStats: ${total} total | ${done} done | ${inprogress} in progress | ${todo} to do | ${highPri} high priority open | ${overdue} overdue\n${retailerDetails}`;
+    }).join("\n\n---\n");
+    return `You are a senior sales analyst. Today is ${week}.\n\nSales task data:\n\n${marketSummaries}\n\nWrite a professional WEEKLY SALES REPORT with these sections:\n1. **Executive Summary**\n2. **Market-by-Market Breakdown**\n3. **Key Actions Required** (top 5, prioritised)\n4. **Risks & Watch Items**\n5. **Week Ahead Outlook**\n\nBe specific — use real retailer names, task names, deadlines. Professional tone.`;
+  };
+
+  const generate = async () => {
+    setLoading(true); setError(null); setReport(null);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:1500, messages:[{ role:"user", content:buildPrompt() }] })
+      });
+      if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e?.error?.message||"HTTP "+res.status); }
+      const data = await res.json();
+      const text = data.content.map(b=>b.text||"").join("");
+      if (!text) throw new Error("Empty response");
+      setReport(text);
+    } catch(e) { setError("Failed: "+e.message); }
+    finally { setLoading(false); }
+  };
+
+  const renderReport = (text) => text.split("\n").map((line,i)=>{
+    if (/^\*\*(.+)\*\*/.test(line)) return <div key={i} style={{ marginTop:i===0?0:20, marginBottom:7, fontWeight:900, fontSize:15, color:"#0F172A", borderBottom:"2px solid #E2E8F0", paddingBottom:5 }}>{line.replace(/\*\*/g,"").replace(/^\d+\.\s*/,"")}</div>;
+    if (/^[-•]\s/.test(line)||/^\d+\.\s/.test(line)) return <div key={i} style={{ display:"flex", gap:8, marginBottom:5, paddingLeft:4 }}><span style={{ color:"#94A3B8", flexShrink:0, fontSize:13 }}>•</span><span style={{ fontSize:13, color:"#374151", lineHeight:1.65 }}>{line.replace(/^[-•\d+.]\s+/,"").replace(/\*\*/g,"")}</span></div>;
+    if (!line.trim()) return <div key={i} style={{ height:6 }}/>;
+    return <p key={i} style={{ fontSize:13, color:"#374151", lineHeight:1.7, margin:"0 0 6px" }}>{line.replace(/\*\*/g,"")}</p>;
+  });
+
+  const week = new Date().toLocaleDateString("en-GB",{ day:"numeric", month:"long", year:"numeric" });
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:3000, backdropFilter:"blur(6px)" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:20, width:680, maxHeight:"90vh", display:"flex", flexDirection:"column", boxShadow:"0 40px 100px rgba(0,0,0,0.25)", overflow:"hidden" }}>
+        <div style={{ background:"linear-gradient(135deg,#0F172A 0%,#1E3A5F 100%)", padding:"24px 28px 20px", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+            <div>
+              <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontWeight:700, letterSpacing:2, textTransform:"uppercase", marginBottom:5 }}>AI Generated</div>
+              <div style={{ fontWeight:900, fontSize:20, color:"#fff", letterSpacing:-0.4 }}>📊 Weekly Sales Report</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.6)", marginTop:3 }}>Week of {week}</div>
+            </div>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.12)", border:"none", color:"#fff", borderRadius:9, width:32, height:32, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10 }}>
+            {[["Markets",markets.length],["Total Tasks",tasks.length],["Completed",`${tasks.filter(t=>t.status==="done").length}/${tasks.length}`],["High Pri. Open",tasks.filter(t=>t.priority==="high"&&t.status!=="done").length]].map(([l,v])=>(
+              <div key={l} style={{ background:"rgba(255,255,255,0.08)", borderRadius:10, padding:"10px 13px" }}>
+                <div style={{ fontWeight:900, fontSize:18, color:"#fff" }}>{v}</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.8, marginTop:1 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
+          {!report&&!loading&&!error&&(
+            <div style={{ textAlign:"center", padding:"32px 20px" }}>
+              <div style={{ fontSize:48, marginBottom:14 }}>🤖</div>
+              <div style={{ fontWeight:800, fontSize:17, color:"#0F172A", marginBottom:8 }}>Generate your weekly report</div>
+              <div style={{ fontSize:13, color:"#64748B", lineHeight:1.6, maxWidth:400, margin:"0 auto 24px" }}>Claude will analyse all your tasks across every market, retailer and store and write a professional report with key actions and risks.</div>
+              <button onClick={generate} style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", border:"none", color:"#fff", borderRadius:12, padding:"14px 32px", cursor:"pointer", fontSize:15, fontWeight:800 }}>✨ Generate Report</button>
+            </div>
+          )}
+          {loading&&<div style={{ textAlign:"center", padding:"40px 20px" }}><Spinner/><div style={{ fontWeight:700, fontSize:14, color:"#0F172A", marginTop:12 }}>Analysing your sales data…</div></div>}
+          {error&&<div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:12, padding:"16px 20px", color:"#DC2626", fontSize:13 }}>{error}</div>}
+          {report&&<div><div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:18 }}>{markets.map(m=><span key={m.id} style={{ background:m.color+"18", color:m.color, borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:700 }}>{m.flag} {m.name}</span>)}</div>{renderReport(report)}</div>}
+        </div>
+        <div style={{ padding:"14px 28px", borderTop:"1px solid #E2E8F0", display:"flex", gap:10, justifyContent:"space-between", flexShrink:0, background:"#F8FAFC" }}>
+          <button onClick={generate} style={{...btnGhost,fontSize:13}}>{report?"🔄 Regenerate":"✨ Generate"}</button>
+          <div style={{ display:"flex", gap:8 }}>
+            {report&&<button onClick={()=>{navigator.clipboard.writeText(report);setCopied(true);setTimeout(()=>setCopied(false),2000);}} style={{...btnGhost,fontSize:13,color:copied?"#16A34A":"#64748B"}}>{copied?"✓ Copied!":"📋 Copy"}</button>}
+            <button onClick={onClose} style={{ background:"#0F172A", border:"none", color:"#fff", borderRadius:9, padding:"9px 20px", cursor:"pointer", fontWeight:700, fontSize:13, fontFamily:"inherit" }}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ROOT APP ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [user,       setUser]       = useState(null);
+  const [markets,    setMarkets]    = useState([]);
+  const [retailers,  setRetailers]  = useState([]);
+  const [stores,     setStores]     = useState([]);
+  const [tasks,      setTasks]      = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [selMarket,  setSelMarket]  = useState(null);
+  const [view,       setView]       = useState("list");
+  const [selTask,    setSelTask]     = useState(null);
+  const [addingMkt,  setAddingMkt]  = useState(false);
+  const [showReport, setShowReport] = useState(false);
+
+  // ── Load all data from Supabase ──
+  const loadData = async (token) => {
+    setLoading(true);
+    const [m, r, s, t] = await Promise.all([
+      sbSelect("markets",   token, "select=*"),
+      sbSelect("retailers", token, "select=*"),
+      sbSelect("stores",    token, "select=*"),
+      sbSelect("tasks",     token, "select=*"),
+    ]);
+    setMarkets(Array.isArray(m)?m:[]);
+    setRetailers(Array.isArray(r)?r:[]);
+    setStores(Array.isArray(s)?s:[]);
+    setTasks(Array.isArray(t)?t.map(task=>({...task, photos: task.photos||[], comments: task.comments||[]})):[]);
+    setLoading(false);
+  };
+
+  const handleLogin = async (userData) => {
+    setUser(userData);
+    await loadData(userData.token);
+  };
+
+  const handleLogout = () => {
+    setUser(null); setMarkets([]); setRetailers([]); setStores([]); setTasks([]);
+  };
+
+  if (!user) return <AuthScreen onLogin={handleLogin}/>;
+
+  // ── CRUD operations ──
+  const addMarket = async ({ name, flag, color }) => {
+    const [row] = await sbInsert("markets", user.token, { name, flag, color, user_id: user.id });
+    if (row?.id) setMarkets(p=>[...p, row]);
+  };
+
+  const addRetailer = async ({ name, type, marketId }) => {
+    const [row] = await sbInsert("retailers", user.token, { name, type, market_id: marketId });
+    if (row?.id) setRetailers(p=>[...p, row]);
+  };
+
+  const addStore = async ({ name, address, retailerId }) => {
+    const [row] = await sbInsert("stores", user.token, { name, address, retailer_id: retailerId });
+    if (row?.id) setStores(p=>[...p, row]);
+  };
+
+  const addTask = async ({ title, status, priority, due, description, comments, photos, retailerId, storeId }) => {
+    const [row] = await sbInsert("tasks", user.token, {
+      title, status, priority,
+      due: due||null,
+      description: description||"",
+      comments: comments||[],
+      retailer_id: retailerId,
+      store_id: storeId||null,
+    });
+    if (row?.id) setTasks(p=>[...p,{...row, photos:[], comments:row.comments||[]}]);
+  };
+
+  const saveTask = async (updated) => {
+    await sbUpdate("tasks", user.token, updated.id, {
+      title:       updated.title,
+      status:      updated.status,
+      priority:    updated.priority,
+      due:         updated.due||null,
+      description: updated.description||"",
+      comments:    updated.comments||[],
+    });
+    // photos stored in local state only (would need storage bucket for persistence)
+    setTasks(p=>p.map(t=>t.id===updated.id?{...t,...updated}:t));
+  };
+
+  const deleteTask = async (id) => {
+    await sbDelete("tasks", user.token, id);
+    setTasks(p=>p.filter(t=>t.id!==id));
+  };
+
+  const visibleMarkets = selMarket ? markets.filter(m=>m.id===selMarket) : markets;
+  const taskStore    = selTask?.store_id ? stores.find(s=>s.id===selTask.store_id) : null;
+  const taskRetailer = selTask ? retailers.find(r=>r.id===selTask.retailer_id) : null;
+  const taskMarket   = taskRetailer ? markets.find(m=>m.id===taskRetailer.market_id) : null;
+
+  return (
+    <div style={{ display:"flex", height:"100vh", fontFamily:"'DM Sans','Segoe UI',sans-serif", background:"#F1F5F9", overflow:"hidden" }}>
+      <Sidebar markets={markets} retailers={retailers} stores={stores} tasks={tasks}
+        selected={selMarket} onSelect={setSelMarket} onAddMarket={()=>setAddingMkt(true)}
+        userEmail={user.email} onLogout={handleLogout}/>
+
+      <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+        {/* Top bar */}
+        <div style={{ background:"#fff", borderBottom:"1px solid #E2E8F0", padding:"13px 24px", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
+          <div>
+            <div style={{ fontWeight:900, fontSize:18, color:"#0F172A", letterSpacing:-0.4 }}>
+              {selMarket?(markets.find(m=>m.id===selMarket)?.flag+" "+markets.find(m=>m.id===selMarket)?.name):"🌐 All Markets"}
+            </div>
+            <div style={{ fontSize:11, color:"#94A3B8" }}>Market → Retailer → Store → Task</div>
+          </div>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={()=>setShowReport(true)} style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", border:"none", color:"#fff", borderRadius:9, padding:"8px 16px", cursor:"pointer", fontSize:12, fontWeight:800, fontFamily:"inherit", display:"flex", alignItems:"center", gap:6, boxShadow:"0 2px 10px rgba(15,23,42,0.25)" }}>
+              📊 Weekly Report
+            </button>
+            <div style={{ display:"flex", background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:9, overflow:"hidden" }}>
+              {[["list","☰ List"],["kanban","⬛ Board"]].map(([v,label])=>(
+                <button key={v} onClick={()=>setView(v)} style={{ background:view===v?"#0F172A":"transparent", color:view===v?"#fff":"#64748B", border:"none", padding:"7px 14px", cursor:"pointer", fontSize:12, fontWeight:view===v?700:500, fontFamily:"inherit" }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 24px" }}>
+          {loading ? <Spinner/> : (
+            <>
+              <StatsStrip tasks={tasks}/>
+              {markets.length===0&&!loading&&(
+                <div style={{ textAlign:"center", padding:"60px 20px", color:"#CBD5E1" }}>
+                  <div style={{ fontSize:48, marginBottom:12 }}>🌍</div>
+                  <div style={{ fontWeight:800, fontSize:18, color:"#94A3B8", marginBottom:8 }}>No markets yet</div>
+                  <div style={{ fontSize:13 }}>Click "+ Add Market" in the sidebar to get started</div>
+                </div>
+              )}
+              {visibleMarkets.map(market=>(
+                <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer}/>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
+      {selTask && taskMarket && taskRetailer && (
+        <TaskModal task={selTask} store={taskStore} retailer={taskRetailer} market={taskMarket}
+          onClose={()=>setSelTask(null)} onSave={saveTask} onDelete={deleteTask}/>
+      )}
+      {addingMkt && <AddMarketModal onClose={()=>setAddingMkt(false)} onAdd={addMarket}/>}
+      {showReport && <WeeklyReportModal markets={markets} retailers={retailers} stores={stores} tasks={tasks} onClose={()=>setShowReport(false)}/>}
+    </div>
+  );
+}
