@@ -1427,11 +1427,17 @@ export default function App() {
       setMyMarkets(null);
     }
 
+    // If manager, fetch only their assigned markets using anon key with id filter
+    let marketsFilter = "select=*";
+    if (myTeamEntry && myTeamEntry.role === "manager" && myTeamEntry.market_ids?.length > 0) {
+      marketsFilter = `select=*&id=in.(${myTeamEntry.market_ids.join(",")})`;
+    }
+
     const [m, r, s, t, team] = await Promise.all([
-      sbSelect("markets",      token, "select=*"),
-      sbSelect("retailers",    token, "select=*"),
-      sbSelect("stores",       token, "select=*"),
-      sbSelect("tasks",        token, "select=*"),
+      sbSelect("markets",   myTeamEntry?.role === "manager" ? SUPA_KEY : token, marketsFilter),
+      sbSelect("retailers", myTeamEntry?.role === "manager" ? SUPA_KEY : token, "select=*"),
+      sbSelect("stores",    myTeamEntry?.role === "manager" ? SUPA_KEY : token, "select=*"),
+      sbSelect("tasks",     myTeamEntry?.role === "manager" ? SUPA_KEY : token, "select=*"),
       sbGetTeam(token),
     ]);
 
