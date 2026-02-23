@@ -533,7 +533,12 @@ function WeeklyUpdatesSection({ store, token, color }) {
 
   const toggleExpand = (key) => setExpanded(p => ({...p, [key]: !p[key]}));
 
-  const visibleWeeks = showAll ? [...allWeeks].reverse() : [...allWeeks].slice(-8).reverse();
+  const visibleWeeks = showAll
+    ? [...allWeeks].reverse()
+    : [...allWeeks].reverse().filter(({weekNum, year}) => {
+        const u = getUpdate(weekNum, year);
+        return !u || u.status !== "closed";
+      });
 
   const openCount   = allWeeks.filter(({weekNum,year}) => { const u = getUpdate(weekNum,year); return !u || u.status !== "closed"; }).length;
   const closedCount = allWeeks.filter(({weekNum,year}) => { const u = getUpdate(weekNum,year); return u && u.status === "closed"; }).length;
