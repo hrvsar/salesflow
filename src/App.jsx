@@ -52,6 +52,40 @@ async function sbDelete(table, token, id) {
   });
 }
 
+
+// ─── Team helpers ─────────────────────────────────────────────────────────────
+async function sbGetTeam(token) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/team_members?select=*&order=created_at.asc`, {
+    headers: authHeaders(token),
+  });
+  return res.json();
+}
+
+async function sbInviteMember(token, ownerId, email, role, marketIds) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/team_members`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Prefer": "return=representation" },
+    body: JSON.stringify({ owner_id: ownerId, email, role, market_ids: marketIds }),
+  });
+  return res.json();
+}
+
+async function sbUpdateMember(token, id, role, marketIds) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/team_members?id=eq.${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(token), "Prefer": "return=representation" },
+    body: JSON.stringify({ role, market_ids: marketIds }),
+  });
+  return res.json();
+}
+
+async function sbDeleteMember(token, id) {
+  await fetch(`${SUPA_URL}/rest/v1/team_members?id=eq.${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUSES = [
   { id:"todo",       label:"To Do",       color:"#64748B" },
@@ -114,11 +148,12 @@ function AuthScreen({ onLogin }) {
     setLoading(false);
     if (data.error || data.msg) {
       setError(data.error_description || data.msg || "Something went wrong.");
-    } else if (mode === "signup" && !data.access_token) {
+    } else if (data.access_token) {
+      // Signed up or logged in successfully — go straight in
+      onLogin({ token: data.access_token, email: data.user?.email, id: data.user?.id });
+    } else if (mode === "signup") {
       setSuccess("Account created! Check your email to confirm, then log in.");
       setMode("login");
-    } else if (data.access_token) {
-      onLogin({ token: data.access_token, email: data.user?.email, id: data.user?.id });
     } else {
       setError("Unexpected response. Please try again.");
     }
@@ -670,7 +705,7 @@ function AddMarketModal({ onClose, onAdd }) {
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout }) {
+function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout, isAdmin, onTeam }) {
   return (
     <div style={{ width:210, minWidth:210, flexShrink:0, background:"#0F172A", display:"flex", flexDirection:"column", height:"100%", overflowY:"auto" }}>
       <div style={{ padding:"18px 16px 16px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", gap:9 }}>
@@ -689,11 +724,20 @@ function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddM
         return <NavItem key={m.id} label={m.name} icon={m.flag} count={cnt} active={selected===m.id} color={m.color} onClick={()=>onSelect(m.id)}/>;
       })}
       <div style={{ marginTop:"auto", padding:"12px 10px", borderTop:"1px solid #1E293B", display:"flex", flexDirection:"column", gap:6 }}>
-        <button onClick={onAddMarket} style={{ width:"100%", background:"none", border:"2px dashed #1E293B", color:"#475569", borderRadius:9, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor="#2563EB";e.currentTarget.style.color="#2563EB";}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
-          + Add Market
-        </button>
+        {isAdmin && onTeam && (
+          <button onClick={onTeam} style={{ width:"100%", background:"none", border:"1px solid #1E293B", color:"#475569", borderRadius:9, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED";e.currentTarget.style.color="#7C3AED";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
+            👥 Manage Team
+          </button>
+        )}
+        {isAdmin && onAddMarket && (
+          <button onClick={onAddMarket} style={{ width:"100%", background:"none", border:"2px dashed #1E293B", color:"#475569", borderRadius:9, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#2563EB";e.currentTarget.style.color="#2563EB";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
+            + Add Market
+          </button>
+        )}
         <button onClick={onLogout} style={{ width:"100%", background:"none", border:"none", color:"#475569", borderRadius:9, padding:"7px", cursor:"pointer", fontSize:11, fontFamily:"inherit" }}>
           Sign out
         </button>
@@ -844,9 +888,190 @@ function WeeklyReportModal({ markets, retailers, stores, tasks, onClose }) {
   );
 }
 
+// ─── Team Management Modal ────────────────────────────────────────────────────
+function TeamModal({ user, markets, onClose }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email,   setEmail]   = useState("");
+  const [role,    setRole]    = useState("manager");
+  const [selMkts, setSelMkts] = useState([]);
+  const [saving,  setSaving]  = useState(false);
+  const [editing, setEditing] = useState(null); // member id being edited
+
+  useEffect(() => {
+    sbGetTeam(user.token).then(data => {
+      setMembers(Array.isArray(data) ? data : []);
+      setLoading(false);
+    });
+  }, []);
+
+  const toggleMarket = (id) => setSelMkts(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
+
+  const invite = async () => {
+    if (!email.trim()) return;
+    if (role === "manager" && selMkts.length === 0) { alert("Please select at least one market for this manager."); return; }
+    setSaving(true);
+    const [row] = await sbInviteMember(user.token, user.id, email.trim(), role, role==="admin"?[]:selMkts);
+    if (row?.id) setMembers(p=>[...p, row]);
+    setEmail(""); setRole("manager"); setSelMkts([]);
+    setSaving(false);
+  };
+
+  const updateMember = async (member) => {
+    await sbUpdateMember(user.token, member.id, member.role, member.role==="admin"?[]:member.market_ids||[]);
+    setMembers(p=>p.map(m=>m.id===member.id?member:m));
+    setEditing(null);
+  };
+
+  const removeMember = async (id) => {
+    await sbDeleteMember(user.token, id);
+    setMembers(p=>p.filter(m=>m.id!==id));
+  };
+
+  const roleColor = (r) => r==="admin"?"#7C3AED":"#2563EB";
+  const roleBg    = (r) => r==="admin"?"#F5F3FF":"#EFF6FF";
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:3000, backdropFilter:"blur(6px)" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:20, width:620, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 40px 100px rgba(0,0,0,0.25)", overflow:"hidden" }}>
+
+        {/* Header */}
+        <div style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", padding:"22px 28px", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontWeight:900, fontSize:19, color:"#fff", letterSpacing:-0.4 }}>👥 Team Management</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:3 }}>Invite team members and control their access</div>
+            </div>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.12)", border:"none", color:"#fff", borderRadius:9, width:32, height:32, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
+
+          {/* Invite form */}
+          <div style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:14, padding:"18px 20px", marginBottom:24 }}>
+            <div style={{ fontWeight:800, fontSize:14, color:"#0F172A", marginBottom:14 }}>Invite a team member</div>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+              <div style={{ flex:"1 1 200px" }}>
+                <label style={labelSt}>Email address</label>
+                <input value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&invite()}
+                  placeholder="colleague@company.com" style={{...inputSt, width:"100%", boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <label style={labelSt}>Role</label>
+                <select value={role} onChange={e=>setRole(e.target.value)} style={inputSt}>
+                  <option value="admin">Admin — all markets</option>
+                  <option value="manager">Manager — specific markets</option>
+                </select>
+              </div>
+            </div>
+
+            {role==="manager" && (
+              <div style={{ marginBottom:14 }}>
+                <label style={labelSt}>Assign markets</label>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+                  {markets.map(m=>(
+                    <button key={m.id} onClick={()=>toggleMarket(m.id)}
+                      style={{ background:selMkts.includes(m.id)?m.color:"#fff", color:selMkts.includes(m.id)?"#fff":"#374151", border:`2px solid ${selMkts.includes(m.id)?m.color:"#E2E8F0"}`, borderRadius:20, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit", transition:"all 0.15s" }}>
+                      {m.flag} {m.name}
+                    </button>
+                  ))}
+                  {markets.length===0&&<span style={{ fontSize:12, color:"#94A3B8" }}>No markets created yet</span>}
+                </div>
+              </div>
+            )}
+
+            <button onClick={invite} disabled={saving} style={{...btnPri("#0F172A"), opacity:saving?0.7:1}}>
+              {saving?"Inviting…":"Send Invite"}
+            </button>
+            <div style={{ fontSize:11, color:"#94A3B8", marginTop:8 }}>
+              The team member signs up at your app URL using this email. Their access is applied automatically.
+            </div>
+          </div>
+
+          {/* Member list */}
+          <div style={{ fontWeight:800, fontSize:14, color:"#0F172A", marginBottom:12 }}>Team members ({members.length})</div>
+          {loading && <Spinner/>}
+          {!loading && members.length===0 && (
+            <div style={{ textAlign:"center", padding:"24px", color:"#CBD5E1", fontSize:13 }}>No team members yet — invite someone above</div>
+          )}
+          {members.map(member=>{
+            const isEditing = editing===member.id;
+            const memberMarkets = markets.filter(m=>(member.market_ids||[]).includes(m.id));
+            return (
+              <div key={member.id} style={{ border:"1px solid #E2E8F0", borderRadius:12, padding:"14px 16px", marginBottom:8, background:"#fff" }}>
+                {isEditing ? (
+                  <EditMemberRow member={member} markets={markets} onSave={updateMember} onCancel={()=>setEditing(null)}/>
+                ) : (
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:36, height:36, borderRadius:"50%", background:"#F1F5F9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:800, color:"#64748B", flexShrink:0 }}>
+                      {member.email[0].toUpperCase()}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:"#0F172A", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{member.email}</div>
+                      <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
+                        <span style={{ background:roleBg(member.role), color:roleColor(member.role), borderRadius:20, padding:"2px 10px", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:0.5 }}>
+                          {member.role==="admin"?"Admin":"Manager"}
+                        </span>
+                        {member.role==="manager" && memberMarkets.map(m=>(
+                          <span key={m.id} style={{ background:m.color+"15", color:m.color, borderRadius:20, padding:"2px 9px", fontSize:10, fontWeight:700 }}>{m.flag} {m.name}</span>
+                        ))}
+                        {member.role==="manager" && memberMarkets.length===0 && (
+                          <span style={{ fontSize:10, color:"#F59E0B", fontWeight:600 }}>⚠ No markets assigned</span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                      <button onClick={()=>setEditing(member.id)} style={{...btnGhost, fontSize:11, padding:"5px 11px"}}>Edit</button>
+                      <button onClick={()=>removeMember(member.id)} style={{...btnGhost, fontSize:11, padding:"5px 11px", color:"#DC2626", background:"#FEF2F2"}}>Remove</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditMemberRow({ member, markets, onSave, onCancel }) {
+  const [role,    setRole]    = useState(member.role);
+  const [selMkts, setSelMkts] = useState(member.market_ids||[]);
+  const toggleMarket = (id) => setSelMkts(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  return (
+    <div>
+      <div style={{ display:"flex", gap:8, marginBottom:10, alignItems:"center" }}>
+        <span style={{ fontWeight:700, fontSize:13, color:"#0F172A", flex:1 }}>{member.email}</span>
+        <select value={role} onChange={e=>setRole(e.target.value)} style={{...inputSt, fontSize:12}}>
+          <option value="admin">Admin</option>
+          <option value="manager">Manager</option>
+        </select>
+      </div>
+      {role==="manager" && (
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+          {markets.map(m=>(
+            <button key={m.id} onClick={()=>toggleMarket(m.id)}
+              style={{ background:selMkts.includes(m.id)?m.color:"#fff", color:selMkts.includes(m.id)?"#fff":"#374151", border:`2px solid ${selMkts.includes(m.id)?m.color:"#E2E8F0"}`, borderRadius:20, padding:"4px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>
+              {m.flag} {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display:"flex", gap:7 }}>
+        <button onClick={()=>onSave({...member, role, market_ids:role==="admin"?[]:selMkts})} style={btnPri("#0F172A")}>Save</button>
+        <button onClick={onCancel} style={btnGhost}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user,       setUser]       = useState(null);
+  const [myRole,     setMyRole]     = useState("admin"); // "admin" | "manager"
+  const [myMarkets,  setMyMarkets]  = useState(null);    // null = all, array = restricted
   const [markets,    setMarkets]    = useState([]);
   const [retailers,  setRetailers]  = useState([]);
   const [stores,     setStores]     = useState([]);
@@ -857,33 +1082,58 @@ export default function App() {
   const [selTask,    setSelTask]     = useState(null);
   const [addingMkt,  setAddingMkt]  = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [showTeam,   setShowTeam]   = useState(false);
+
+  const isAdmin = myRole === "admin";
 
   // ── Load all data from Supabase ──
-  const loadData = async (token) => {
+  const loadData = async (token, userId, email) => {
     setLoading(true);
-    const [m, r, s, t] = await Promise.all([
-      sbSelect("markets",   token, "select=*"),
-      sbSelect("retailers", token, "select=*"),
-      sbSelect("stores",    token, "select=*"),
-      sbSelect("tasks",     token, "select=*"),
+    const [m, r, s, t, team] = await Promise.all([
+      sbSelect("markets",      token, "select=*"),
+      sbSelect("retailers",    token, "select=*"),
+      sbSelect("stores",       token, "select=*"),
+      sbSelect("tasks",        token, "select=*"),
+      sbGetTeam(token),
     ]);
-    setMarkets(Array.isArray(m)?m:[]);
-    setRetailers(Array.isArray(r)?r:[]);
-    setStores(Array.isArray(s)?s:[]);
-    setTasks(Array.isArray(t)?t.map(task=>({...task, photos: task.photos||[], comments: task.comments||[]})):[]);
+
+    const allMarkets   = Array.isArray(m) ? m : [];
+    const allRetailers = Array.isArray(r) ? r : [];
+    const allStores    = Array.isArray(s) ? s : [];
+    const allTasks     = Array.isArray(t) ? t.map(task=>({...task, photos:[], comments:task.comments||[]})) : [];
+    const teamList     = Array.isArray(team) ? team : [];
+
+    // Check if this user is a manager (invited by someone else)
+    const myEntry = teamList.find(tm => tm.email === email);
+    if (myEntry && myEntry.role === "manager") {
+      setMyRole("manager");
+      setMyMarkets(myEntry.market_ids || []);
+    } else {
+      setMyRole("admin");
+      setMyMarkets(null);
+    }
+
+    setMarkets(allMarkets);
+    setRetailers(allRetailers);
+    setStores(allStores);
+    setTasks(allTasks);
     setLoading(false);
   };
 
   const handleLogin = async (userData) => {
     setUser(userData);
-    await loadData(userData.token);
+    await loadData(userData.token, userData.id, userData.email);
   };
 
   const handleLogout = () => {
     setUser(null); setMarkets([]); setRetailers([]); setStores([]); setTasks([]);
+    setMyRole("admin"); setMyMarkets(null);
   };
 
   if (!user) return <AuthScreen onLogin={handleLogin}/>;
+
+  // ── Filter markets by role ──
+  const allowedMarkets = myMarkets===null ? markets : markets.filter(m=>myMarkets.includes(m.id));
 
   // ── CRUD operations ──
   const addMarket = async ({ name, flag, color }) => {
@@ -922,7 +1172,6 @@ export default function App() {
       description: updated.description||"",
       comments:    updated.comments||[],
     });
-    // photos stored in local state only (would need storage bucket for persistence)
     setTasks(p=>p.map(t=>t.id===updated.id?{...t,...updated}:t));
   };
 
@@ -931,30 +1180,42 @@ export default function App() {
     setTasks(p=>p.filter(t=>t.id!==id));
   };
 
-  const visibleMarkets = selMarket ? markets.filter(m=>m.id===selMarket) : markets;
+  const visibleMarkets = selMarket ? allowedMarkets.filter(m=>m.id===selMarket) : allowedMarkets;
+  const visibleTasks   = tasks.filter(t => {
+    const ret = retailers.find(r=>r.id===t.retailer_id);
+    return ret && allowedMarkets.some(m=>m.id===ret.market_id);
+  });
+
   const taskStore    = selTask?.store_id ? stores.find(s=>s.id===selTask.store_id) : null;
   const taskRetailer = selTask ? retailers.find(r=>r.id===selTask.retailer_id) : null;
   const taskMarket   = taskRetailer ? markets.find(m=>m.id===taskRetailer.market_id) : null;
 
   return (
     <div style={{ display:"flex", height:"100vh", fontFamily:"'DM Sans','Segoe UI',sans-serif", background:"#F1F5F9", overflow:"hidden" }}>
-      <Sidebar markets={markets} retailers={retailers} stores={stores} tasks={tasks}
-        selected={selMarket} onSelect={setSelMarket} onAddMarket={()=>setAddingMkt(true)}
-        userEmail={user.email} onLogout={handleLogout}/>
+      <Sidebar markets={allowedMarkets} retailers={retailers} stores={stores} tasks={visibleTasks}
+        selected={selMarket} onSelect={setSelMarket}
+        onAddMarket={isAdmin?()=>setAddingMkt(true):null}
+        userEmail={user.email} onLogout={handleLogout}
+        isAdmin={isAdmin} onTeam={()=>setShowTeam(true)}/>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
         {/* Top bar */}
         <div style={{ background:"#fff", borderBottom:"1px solid #E2E8F0", padding:"13px 24px", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
           <div>
             <div style={{ fontWeight:900, fontSize:18, color:"#0F172A", letterSpacing:-0.4 }}>
-              {selMarket?(markets.find(m=>m.id===selMarket)?.flag+" "+markets.find(m=>m.id===selMarket)?.name):"🌐 All Markets"}
+              {selMarket?(allowedMarkets.find(m=>m.id===selMarket)?.flag+" "+allowedMarkets.find(m=>m.id===selMarket)?.name):"🌐 All Markets"}
             </div>
-            <div style={{ fontSize:11, color:"#94A3B8" }}>Market → Retailer → Store → Task</div>
+            <div style={{ fontSize:11, color:"#94A3B8", display:"flex", alignItems:"center", gap:6 }}>
+              Market → Retailer → Store → Task
+              {!isAdmin && <span style={{ background:"#EFF6FF", color:"#2563EB", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:700 }}>Manager View</span>}
+            </div>
           </div>
           <div style={{ marginLeft:"auto", display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={()=>setShowReport(true)} style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", border:"none", color:"#fff", borderRadius:9, padding:"8px 16px", cursor:"pointer", fontSize:12, fontWeight:800, fontFamily:"inherit", display:"flex", alignItems:"center", gap:6, boxShadow:"0 2px 10px rgba(15,23,42,0.25)" }}>
-              📊 Weekly Report
-            </button>
+            {isAdmin && (
+              <button onClick={()=>setShowReport(true)} style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", border:"none", color:"#fff", borderRadius:9, padding:"8px 16px", cursor:"pointer", fontSize:12, fontWeight:800, fontFamily:"inherit", display:"flex", alignItems:"center", gap:6, boxShadow:"0 2px 10px rgba(15,23,42,0.25)" }}>
+                📊 Weekly Report
+              </button>
+            )}
             <div style={{ display:"flex", background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:9, overflow:"hidden" }}>
               {[["list","☰ List"],["kanban","⬛ Board"]].map(([v,label])=>(
                 <button key={v} onClick={()=>setView(v)} style={{ background:view===v?"#0F172A":"transparent", color:view===v?"#fff":"#64748B", border:"none", padding:"7px 14px", cursor:"pointer", fontSize:12, fontWeight:view===v?700:500, fontFamily:"inherit" }}>{label}</button>
@@ -967,12 +1228,16 @@ export default function App() {
         <div style={{ flex:1, overflowY:"auto", padding:"20px 24px" }}>
           {loading ? <Spinner/> : (
             <>
-              <StatsStrip tasks={tasks}/>
-              {markets.length===0&&!loading&&(
+              <StatsStrip tasks={visibleTasks}/>
+              {allowedMarkets.length===0&&!loading&&(
                 <div style={{ textAlign:"center", padding:"60px 20px", color:"#CBD5E1" }}>
                   <div style={{ fontSize:48, marginBottom:12 }}>🌍</div>
-                  <div style={{ fontWeight:800, fontSize:18, color:"#94A3B8", marginBottom:8 }}>No markets yet</div>
-                  <div style={{ fontSize:13 }}>Click "+ Add Market" in the sidebar to get started</div>
+                  <div style={{ fontWeight:800, fontSize:18, color:"#94A3B8", marginBottom:8 }}>
+                    {isAdmin?"No markets yet":"No markets assigned"}
+                  </div>
+                  <div style={{ fontSize:13 }}>
+                    {isAdmin?"Click \"+ Add Market\" in the sidebar to get started":"Ask your admin to assign you to a market"}
+                  </div>
                 </div>
               )}
               {visibleMarkets.map(market=>(
@@ -989,7 +1254,8 @@ export default function App() {
           onClose={()=>setSelTask(null)} onSave={saveTask} onDelete={deleteTask}/>
       )}
       {addingMkt && <AddMarketModal onClose={()=>setAddingMkt(false)} onAdd={addMarket}/>}
-      {showReport && <WeeklyReportModal markets={markets} retailers={retailers} stores={stores} tasks={tasks} onClose={()=>setShowReport(false)}/>}
+      {showReport && <WeeklyReportModal markets={allowedMarkets} retailers={retailers} stores={stores} tasks={visibleTasks} onClose={()=>setShowReport(false)}/>}
+      {showTeam   && <TeamModal user={user} markets={markets} onClose={()=>setShowTeam(false)}/>}
     </div>
   );
 }
