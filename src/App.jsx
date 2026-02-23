@@ -1398,6 +1398,26 @@ export default function App() {
   // ── Load all data from Supabase ──
   const loadData = async (token, userId, email) => {
     setLoading(true);
+    // Fetch team entry for this specific email using anon key (bypasses RLS owner check)
+    const myEntryRes = await fetch(
+      `${SUPA_URL}/rest/v1/team_members?email=eq.${encodeURIComponent(email)}&select=*&limit=1`,
+      { headers: { "Content-Type":"application/json", "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` } }
+    );
+    const myEntryData = await myEntryRes.json();
+    const myTeamEntry = Array.isArray(myEntryData) && myEntryData.length > 0 ? myEntryData[0] : null;
+
+    // Set role BEFORE loading data so filters apply correctly
+    if (myTeamEntry && myTeamEntry.role === "manager") {
+      setMyRole("manager");
+      setMyMarkets(myTeamEntry.market_ids || []);
+    } else if (myTeamEntry && myTeamEntry.role === "admin") {
+      setMyRole("admin");
+      setMyMarkets(null);
+    } else {
+      setMyRole("admin");
+      setMyMarkets(null);
+    }
+
     const [m, r, s, t, team] = await Promise.all([
       sbSelect("markets",      token, "select=*"),
       sbSelect("retailers",    token, "select=*"),
@@ -1412,23 +1432,7 @@ export default function App() {
     const allTasks     = Array.isArray(t) ? t.map(task=>({...task, photos:[], comments:task.comments||[]})) : [];
     const teamList     = Array.isArray(team) ? team : [];
 
-    // Determine role: if there's a team_members entry for this email, use that role.
-    // Only grant admin if NO entry exists (they are the original account owner).
-    const myEntry = teamList.find(tm => tm.email === email);
-    if (myEntry) {
-      if (myEntry.role === "manager") {
-        setMyRole("manager");
-        setMyMarkets(myEntry.market_ids || []);
-      } else {
-        // admin entry — full access
-        setMyRole("admin");
-        setMyMarkets(null);
-      }
-    } else {
-      // No entry found — original account owner, full admin
-      setMyRole("admin");
-      setMyMarkets(null);
-    }
+    // Role already set above from direct email lookup
 
     setMarkets(allMarkets);
     setRetailers(allRetailers);
