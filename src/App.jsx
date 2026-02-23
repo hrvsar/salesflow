@@ -440,8 +440,277 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
   );
 }
 
+
+// ─── Week helpers ─────────────────────────────────────────────────────────────
+function getWeekNumber(date) {
+  const d = new Date(date);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 4 - (d.getDay()||7));
+  const yearStart = new Date(d.getFullYear(),0,1);
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+function getWeekBounds(weekNum, year) {
+  // Find Monday of that ISO week
+  const jan4 = new Date(year, 0, 4);
+  const startOfWeek1 = new Date(jan4);
+  startOfWeek1.setDate(jan4.getDate() - (jan4.getDay()||7) + 1);
+  const monday = new Date(startOfWeek1);
+  monday.setDate(startOfWeek1.getDate() + (weekNum - 1) * 7);
+  const wednesday = new Date(monday); wednesday.setDate(monday.getDate() + 2);
+  const sunday    = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+  return { monday, wednesday, sunday, label: `${fmt(monday)} – ${fmt(sunday)}`, due: wednesday.toISOString().slice(0,10) };
+}
+function isWeekComplete(w) {
+  return w.wtd !== null && w.wtd !== "" &&
+         w.lywtd !== null && w.lywtd !== "" &&
+         w.best_product_name && w.best_product_name.trim() !== "" &&
+         w.best_product_revenue !== null && w.best_product_revenue !== "" &&
+         w.had_promotion !== null &&
+         w.had_ba !== null;
+}
+
+// ─── Weekly Updates Section ───────────────────────────────────────────────────
+function WeeklyUpdatesSection({ store, token, color }) {
+  const [updates,   setUpdates]   = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [showAll,   setShowAll]   = useState(false);
+  const [expanded,  setExpanded]  = useState({});
+  const [saving,    setSaving]    = useState({});
+
+  const now  = new Date();
+  const currentWeek = getWeekNumber(now);
+  const currentYear = now.getFullYear();
+
+  // Generate all weeks from week 1 to current week
+  const allWeeks = [];
+  for (let w = 1; w <= currentWeek; w++) {
+    allWeeks.push({ weekNum: w, year: currentYear });
+  }
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetch(
+        `${SUPA_URL}/rest/v1/weekly_updates?store_id=eq.${store.id}&select=*&order=week_number.desc`,
+        { headers: { "Content-Type":"application/json", "apikey": SUPA_KEY, "Authorization": `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      setUpdates(Array.isArray(data) ? data : []);
+      // Auto-expand current week
+      setExpanded({ [`${currentYear}-${currentWeek}`]: true });
+      setLoading(false);
+    }
+    load();
+  }, [store.id]);
+
+  const getUpdate = (weekNum, year) => updates.find(u => u.week_number === weekNum && u.year === year);
+
+  const saveUpdate = async (weekNum, year, fields) => {
+    const key = `${year}-${weekNum}`;
+    setSaving(p => ({...p, [key]: true}));
+    const bounds = getWeekBounds(weekNum, year);
+    const existing = getUpdate(weekNum, year);
+    if (existing) {
+      const res = await fetch(`${SUPA_URL}/rest/v1/weekly_updates?id=eq.${existing.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${token}`, "Prefer":"return=representation" },
+        body: JSON.stringify(fields),
+      });
+      const [row] = await res.json();
+      if (row) setUpdates(p => p.map(u => u.id === row.id ? row : u));
+    } else {
+      const res = await fetch(`${SUPA_URL}/rest/v1/weekly_updates`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${token}`, "Prefer":"return=representation" },
+        body: JSON.stringify({ store_id: store.id, week_number: weekNum, year, week_start: bounds.monday.toISOString().slice(0,10), week_end: bounds.sunday.toISOString().slice(0,10), ...fields }),
+      });
+      const [row] = await res.json();
+      if (row) setUpdates(p => [...p, row]);
+    }
+    setSaving(p => ({...p, [key]: false}));
+  };
+
+  const toggleExpand = (key) => setExpanded(p => ({...p, [key]: !p[key]}));
+
+  const visibleWeeks = showAll ? [...allWeeks].reverse() : [...allWeeks].slice(-8).reverse();
+
+  const openCount   = allWeeks.filter(({weekNum,year}) => { const u = getUpdate(weekNum,year); return !u || u.status !== "closed"; }).length;
+  const closedCount = allWeeks.filter(({weekNum,year}) => { const u = getUpdate(weekNum,year); return u && u.status === "closed"; }).length;
+
+  return (
+    <div style={{ borderTop:"2px solid #F1F5F9", padding:"14px 16px", background:"#FAFBFC" }}>
+      {/* Section header */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+        <span style={{ fontSize:11, fontWeight:800, color:"#64748B", textTransform:"uppercase", letterSpacing:0.8 }}>📅 Weekly Updates</span>
+        <span style={{ fontSize:10, background:"#FEE2E2", color:"#DC2626", borderRadius:20, padding:"0 8px", fontWeight:700 }}>{openCount} open</span>
+        <span style={{ fontSize:10, background:"#DCFCE7", color:"#16A34A", borderRadius:20, padding:"0 8px", fontWeight:700 }}>{closedCount} closed</span>
+        <button onClick={()=>setShowAll(s=>!s)} style={{ marginLeft:"auto", fontSize:11, color:"#64748B", background:"none", border:"1px solid #E2E8F0", borderRadius:7, padding:"3px 10px", cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
+          {showAll ? "Show less ▲" : "Show all ▼"}
+        </button>
+      </div>
+
+      {loading && <div style={{ color:"#94A3B8", fontSize:12, textAlign:"center", padding:10 }}>Loading…</div>}
+
+      {!loading && visibleWeeks.map(({weekNum, year}) => {
+        const key     = `${year}-${weekNum}`;
+        const bounds  = getWeekBounds(weekNum, year);
+        const update  = getUpdate(weekNum, year) || {};
+        const closed  = update.status === "closed";
+        const complete = isWeekComplete(update);
+        const isCurrentWeek = weekNum === currentWeek && year === currentYear;
+        const isOpen  = expanded[key];
+
+        const statusColor = closed ? "#16A34A" : "#DC2626";
+        const statusBg    = closed ? "#DCFCE7"  : "#FEE2E2";
+        const statusLabel = closed ? "✓ Closed"  : isCurrentWeek ? "⚠ Due Wed" : "Open";
+
+        return (
+          <div key={key} style={{ border:`1.5px solid ${closed?"#BBF7D0":"#FECACA"}`, borderRadius:10, marginBottom:8, overflow:"hidden", background:"#fff" }}>
+            {/* Week header row */}
+            <div onClick={()=>toggleExpand(key)}
+              style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", cursor:"pointer", background: closed?"#F0FDF4": isCurrentWeek?"#FFF7ED":"#fff" }}>
+              <div style={{ width:28, height:28, borderRadius:8, background:statusBg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                <span style={{ fontSize:11, fontWeight:900, color:statusColor }}>W{weekNum}</span>
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:700, fontSize:13, color: closed?"#16A34A":"#DC2626" }}>
+                  Week {weekNum} {isCurrentWeek && <span style={{ fontSize:10, background:"#F59E0B22", color:"#D97706", borderRadius:20, padding:"1px 8px", fontWeight:700, marginLeft:4 }}>Current</span>}
+                </div>
+                <div style={{ fontSize:11, color:"#94A3B8" }}>{bounds.label} · Due {bounds.due}</div>
+              </div>
+              <span style={{ fontSize:10, background:statusBg, color:statusColor, borderRadius:20, padding:"2px 10px", fontWeight:700 }}>{statusLabel}</span>
+              <Chevron open={isOpen}/>
+            </div>
+
+            {/* Expanded form */}
+            {isOpen && !closed && (
+              <WeekForm weekNum={weekNum} year={year} update={update} color={color}
+                saving={!!saving[key]} onSave={(fields)=>saveUpdate(weekNum,year,fields)}/>
+            )}
+            {isOpen && closed && (
+              <WeekSummary update={update} color={color}/>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Week Form (editable) ─────────────────────────────────────────────────────
+function WeekForm({ weekNum, year, update, color, saving, onSave }) {
+  const [f, setF] = useState({
+    wtd:                update.wtd ?? "",
+    lywtd:              update.lywtd ?? "",
+    best_product_name:  update.best_product_name ?? "",
+    best_product_revenue: update.best_product_revenue ?? "",
+    had_promotion:      update.had_promotion ?? null,
+    had_ba:             update.had_ba ?? null,
+  });
+  const [lastSaved, setLastSaved] = useState(null);
+
+  const complete = isWeekComplete(f);
+
+  const save = async (extra = {}) => {
+    await onSave({...f, ...extra});
+    setLastSaved(new Date().toLocaleTimeString());
+  };
+  const close = async () => {
+    if (!complete) return;
+    await onSave({...f, status:"closed"});
+  };
+
+  const numFld = (key, label, placeholder) => (
+    <div>
+      <label style={labelSt}>{label}</label>
+      <input type="number" value={f[key]} onChange={e=>setF(p=>({...p,[key]:e.target.value}))}
+        onBlur={()=>save()} placeholder={placeholder}
+        style={{...inputSt, width:"100%", boxSizing:"border-box"}}/>
+    </div>
+  );
+
+  const yesNo = (key, label) => (
+    <div>
+      <label style={labelSt}>{label}</label>
+      <div style={{ display:"flex", gap:6 }}>
+        {[true, false].map(val => (
+          <button key={String(val)} onClick={()=>{ setF(p=>({...p,[key]:val})); setTimeout(()=>save({[key]:val}),0); }}
+            style={{ flex:1, padding:"7px", border:`2px solid ${f[key]===val?color:"#E2E8F0"}`, background:f[key]===val?color+"15":"#fff", color:f[key]===val?color:"#64748B", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
+            {val?"Yes":"No"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding:"14px 16px", borderTop:"1px solid #E2E8F0", background:"#FEFEFE" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+        {numFld("wtd",   "WTD Sales (£)",  "e.g. 12500")}
+        {numFld("lywtd", "LYWTD Sales (£)","e.g. 11800")}
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+        <div>
+          <label style={labelSt}>Best Selling Product</label>
+          <input value={f.best_product_name} onChange={e=>setF(p=>({...p,best_product_name:e.target.value}))}
+            onBlur={()=>save()} placeholder="Product name…"
+            style={{...inputSt, width:"100%", boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={labelSt}>Product Revenue (£)</label>
+          <input type="number" value={f.best_product_revenue} onChange={e=>setF(p=>({...p,best_product_revenue:e.target.value}))}
+            onBlur={()=>save()} placeholder="e.g. 3200"
+            style={{...inputSt, width:"100%", boxSizing:"border-box"}}/>
+        </div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+        {yesNo("had_promotion", "Promotions this week?")}
+        {yesNo("had_ba",        "BA in store this week?")}
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ fontSize:11, color:"#94A3B8" }}>{lastSaved ? `Auto-saved ${lastSaved}` : "Fields save automatically on blur"}</span>
+        <button onClick={close} disabled={!complete || saving}
+          style={{ background:complete?"#16A34A":"#E2E8F0", border:"none", color:complete?"#fff":"#94A3B8", borderRadius:9, padding:"8px 20px", cursor:complete?"pointer":"not-allowed", fontWeight:800, fontSize:13, fontFamily:"inherit", transition:"all 0.2s" }}>
+          {saving ? "Saving…" : complete ? "✓ Close Week" : "Fill all fields to close"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Week Summary (read-only closed view) ────────────────────────────────────
+function WeekSummary({ update, color }) {
+  const fmt = (n) => n!=null ? `£${Number(n).toLocaleString()}` : "—";
+  const vs = update.lywtd && update.wtd ? ((update.wtd - update.lywtd) / update.lywtd * 100).toFixed(1) : null;
+  return (
+    <div style={{ padding:"14px 16px", borderTop:"1px solid #BBF7D0", background:"#F0FDF4" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:10 }}>
+        {[
+          ["WTD", fmt(update.wtd)],
+          ["LYWTD", fmt(update.lywtd)],
+          ["vs LY", vs ? `${vs>0?"+":""}${vs}%` : "—"],
+          ["Best Product Revenue", fmt(update.best_product_revenue)],
+        ].map(([l,v])=>(
+          <div key={l} style={{ background:"#fff", borderRadius:8, padding:"8px 10px", border:"1px solid #BBF7D0" }}>
+            <div style={{ fontSize:10, color:"#64748B", fontWeight:800, textTransform:"uppercase", letterSpacing:0.8, marginBottom:2 }}>{l}</div>
+            <div style={{ fontSize:14, fontWeight:900, color: l==="vs LY"?(vs>0?"#16A34A":"#DC2626"):"#0F172A" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:10, fontSize:12, color:"#374151" }}>
+        <span>🏆 <strong>{update.best_product_name||"—"}</strong></span>
+        <span style={{ color:"#94A3B8" }}>·</span>
+        <span>Promo: <strong>{update.had_promotion?"Yes":"No"}</strong></span>
+        <span style={{ color:"#94A3B8" }}>·</span>
+        <span>BA: <strong>{update.had_ba?"Yes":"No"}</strong></span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Store Block ──────────────────────────────────────────────────────────────
-function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTask }) {
+function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTask, token }) {
   const [open, setOpen] = useState(true);
   const myTasks = tasks.filter(t=>t.store_id===store.id||t.storeId===store.id);
   const done = myTasks.filter(t=>t.status==="done").length;
@@ -514,6 +783,9 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
             </div>
           )}
           <AddTaskInline storeId={store.id} retailerId={retailer.id} color={market.color} onAdd={onAddTask}/>
+          {(retailer.type==="Department Store") && (
+            <WeeklyUpdatesSection store={store} token={token} color={market.color}/>
+          )}
         </div>
       )}
     </div>
@@ -521,7 +793,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
 }
 
 // ─── Retailer Block ───────────────────────────────────────────────────────────
-function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore }) {
+function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, token }) {
   const [open,         setOpen]         = useState(true);
   const [addingStore,  setAddingStore]  = useState(false);
   const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
@@ -583,7 +855,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
           )}
           {myStores.map(store=>(
             <div key={store.id} style={{ marginTop:8 }}>
-              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask}/>
+              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} token={token}/>
             </div>
           ))}
         </div>
@@ -593,7 +865,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
 }
 
 // ─── Market Section ───────────────────────────────────────────────────────────
-function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer }) {
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, token }) {
   const [open,       setOpen]       = useState(true);
   const [addingRet,  setAddingRet]  = useState(false);
   const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
@@ -650,7 +922,7 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           )}
           {myRets.map(ret=>(
             <RetailerBlock key={ret.id} retailer={ret} market={market} stores={stores} tasks={tasks}
-              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer}/>
+              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer} token={token}/>
           ))}
         </div>
       )}
@@ -1242,7 +1514,7 @@ export default function App() {
               )}
               {visibleMarkets.map(market=>(
                 <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
-                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer}/>
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} token={user.token}/>
               ))}
             </>
           )}
