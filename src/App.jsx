@@ -64,10 +64,12 @@ async function sbGetTeam(token) {
 async function sbInviteMember(token, ownerId, email, role, marketIds) {
   const res = await fetch(`${SUPA_URL}/rest/v1/team_members`, {
     method: "POST",
-    headers: { ...authHeaders(token), "Prefer": "return=representation" },
-    body: JSON.stringify({ owner_id: ownerId, email, role, market_ids: marketIds }),
+    headers: { ...authHeaders(token), "Prefer": "return=representation", "Content-Type": "application/json" },
+    body: JSON.stringify({ owner_id: ownerId, email: email.toLowerCase().trim(), role, market_ids: marketIds }),
   });
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || data?.hint || JSON.stringify(data));
+  return Array.isArray(data) ? data : [data];
 }
 
 async function sbUpdateMember(token, id, role, marketIds) {
@@ -1216,13 +1218,19 @@ function TeamModal({ user, markets, onClose }) {
 
   const toggleMarket = (id) => setSelMkts(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
 
+  const [inviteError, setInviteError] = useState("");
   const invite = async () => {
     if (!email.trim()) return;
     if (role === "manager" && selMkts.length === 0) { alert("Please select at least one market for this manager."); return; }
-    setSaving(true);
-    const [row] = await sbInviteMember(user.token, user.id, email.trim(), role, role==="admin"?[]:selMkts);
-    if (row?.id) setMembers(p=>[...p, row]);
-    setEmail(""); setRole("manager"); setSelMkts([]);
+    setSaving(true); setInviteError("");
+    try {
+      const rows = await sbInviteMember(user.token, user.id, email.trim(), role, role==="admin"?[]:selMkts);
+      const row = rows[0];
+      if (row?.id) setMembers(p=>[...p, row]);
+      setEmail(""); setRole("manager"); setSelMkts([]);
+    } catch(e) {
+      setInviteError(e.message || "Failed to invite. Try again.");
+    }
     setSaving(false);
   };
 
@@ -1293,6 +1301,7 @@ function TeamModal({ user, markets, onClose }) {
             <button onClick={invite} disabled={saving} style={{...btnPri("#0F172A"), opacity:saving?0.7:1}}>
               {saving?"Inviting…":"Send Invite"}
             </button>
+            {inviteError && <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", color:"#DC2626", borderRadius:8, padding:"8px 12px", fontSize:12, marginTop:8 }}>{inviteError}</div>}
             <div style={{ fontSize:11, color:"#94A3B8", marginTop:8 }}>
               The team member signs up at your app URL using this email. Their access is applied automatically.
             </div>
