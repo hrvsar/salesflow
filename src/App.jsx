@@ -803,6 +803,19 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
   const [addingStore,  setAddingStore]  = useState(false);
   const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
   const [savingStore,  setSavingStore]  = useState(false);
+  const [editing,      setEditing]      = useState(false);
+  const [editForm,     setEditForm]     = useState({ name: retailer.name, type: retailer.type });
+  const [savingEdit,   setSavingEdit]   = useState(false);
+
+  const saveEdit = async () => {
+    if (!editForm.name.trim()) return;
+    setSavingEdit(true);
+    await sbUpdate("retailers", token, retailer.id, { name: editForm.name.trim(), type: editForm.type });
+    retailer.name = editForm.name.trim();
+    retailer.type = editForm.type;
+    setSavingEdit(false);
+    setEditing(false);
+  };
 
   const myStores     = stores.filter(s=>(s.retailer_id||s.retailerId)===retailer.id);
   const allMyTasks   = tasks.filter(t=>(t.retailer_id||t.retailerId)===retailer.id);
@@ -832,10 +845,29 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
           <span style={{ fontSize:11, color:"#94A3B8", marginRight:8 }}>{done}/{allMyTasks.length} done</span>
           <div style={{ width:60 }}><ProgressBar value={pct} color={market.color}/></div>
         </div>
+        <button onClick={()=>{ setEditForm({name:retailer.name,type:retailer.type}); setEditing(true); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", flexShrink:0 }}>✏️ Edit</button>
         <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"12px", background:"#F8FAFC" }}>
+          {editing && (
+            <div style={{ background:"#fff", border:"1px solid #E2E8F0", borderRadius:10, padding:"14px 16px", marginBottom:12, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+              <div style={{ flex:"1 1 160px" }}>
+                <label style={labelSt}>Retailer Name</label>
+                <input value={editForm.name} onChange={e=>setEditForm(p=>({...p,name:e.target.value}))}
+                  onKeyDown={e=>e.key==="Enter"&&saveEdit()} autoFocus
+                  style={{...inputSt, width:"100%", boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <label style={labelSt}>Type</label>
+                <select value={editForm.type} onChange={e=>setEditForm(p=>({...p,type:e.target.value}))} style={inputSt}>
+                  {RETAILER_TYPES.map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <button onClick={saveEdit} disabled={savingEdit} style={{...btnPri(market.color), opacity:savingEdit?0.7:1}}>{savingEdit?"Saving…":"Save"}</button>
+              <button onClick={()=>setEditing(false)} style={btnGhost}>Cancel</button>
+            </div>
+          )}
           <AccountTaskList tasks={accountTasks} market={market} retailer={retailer} onTaskClick={onTaskClick} onAddTask={onAddTask}/>
           {addingStore && (
             <div style={{ background:"#fff", border:"1px solid #E2E8F0", borderRadius:10, padding:"13px 14px", marginBottom:10, marginTop:4, display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
