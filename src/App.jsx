@@ -798,7 +798,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
 }
 
 // ─── Retailer Block ───────────────────────────────────────────────────────────
-function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, token }) {
+function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, token, isAdmin }) {
   const [open,         setOpen]         = useState(true);
   const [addingStore,  setAddingStore]  = useState(false);
   const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
@@ -845,8 +845,8 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
           <span style={{ fontSize:11, color:"#94A3B8", marginRight:8 }}>{done}/{allMyTasks.length} done</span>
           <div style={{ width:60 }}><ProgressBar value={pct} color={market.color}/></div>
         </div>
-        <button onClick={()=>{ setEditForm({name:retailer.name,type:retailer.type}); setEditing(true); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", flexShrink:0 }}>✏️ Edit</button>
-        <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>
+        {isAdmin && <button onClick={()=>{ setEditForm({name:retailer.name,type:retailer.type}); setEditing(true); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", flexShrink:0 }}>✏️ Edit</button>}
+        {isAdmin && <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>}
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"12px", background:"#F8FAFC" }}>
@@ -902,7 +902,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
 }
 
 // ─── Market Section ───────────────────────────────────────────────────────────
-function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, token }) {
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, token, isAdmin }) {
   const [open,       setOpen]       = useState(true);
   const [addingRet,  setAddingRet]  = useState(false);
   const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
@@ -931,7 +931,7 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           </div>
           <span style={{ color:"#CBD5E1", fontSize:12, marginLeft:4, display:"inline-block", transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
         </div>
-        <button onClick={()=>setAddingRet(true)} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>
+        {isAdmin && <button onClick={()=>setAddingRet(true)} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>}
       </div>
       {open && (
         <div style={{ paddingLeft:48 }}>
@@ -959,7 +959,7 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           )}
           {myRets.map(ret=>(
             <RetailerBlock key={ret.id} retailer={ret} market={market} stores={stores} tasks={tasks}
-              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer} token={token}/>
+              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer} token={token} isAdmin={isAdmin}/>
           ))}
         </div>
       )}
@@ -1412,12 +1412,20 @@ export default function App() {
     const allTasks     = Array.isArray(t) ? t.map(task=>({...task, photos:[], comments:task.comments||[]})) : [];
     const teamList     = Array.isArray(team) ? team : [];
 
-    // Check if this user is a manager (invited by someone else)
+    // Determine role: if there's a team_members entry for this email, use that role.
+    // Only grant admin if NO entry exists (they are the original account owner).
     const myEntry = teamList.find(tm => tm.email === email);
-    if (myEntry && myEntry.role === "manager") {
-      setMyRole("manager");
-      setMyMarkets(myEntry.market_ids || []);
+    if (myEntry) {
+      if (myEntry.role === "manager") {
+        setMyRole("manager");
+        setMyMarkets(myEntry.market_ids || []);
+      } else {
+        // admin entry — full access
+        setMyRole("admin");
+        setMyMarkets(null);
+      }
     } else {
+      // No entry found — original account owner, full admin
       setMyRole("admin");
       setMyMarkets(null);
     }
@@ -1551,7 +1559,7 @@ export default function App() {
               )}
               {visibleMarkets.map(market=>(
                 <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
-                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} token={user.token}/>
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} token={user.token} isAdmin={isAdmin}/>
               ))}
             </>
           )}
