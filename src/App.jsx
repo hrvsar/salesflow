@@ -605,7 +605,7 @@ function WeeklyUpdatesSection({ store, token, color, products }) {
                 <div style={{ fontSize:11, color:"#94A3B8" }}>{bounds.label} · Due {bounds.due}</div>
               </div>
               <span style={{ fontSize:10, background:statusBg, color:statusColor, borderRadius:20, padding:"2px 10px", fontWeight:700 }}>{statusLabel}</span>
-              <button onClick={async(e)=>{e.stopPropagation();if(!window.confirm(`Delete Week ${weekNum} data?`))return; const u=getUpdate(weekNum,year); if(u?.id){await fetch(`${SUPA_URL}/rest/v1/weekly_updates?id=eq.${u.id}`,{method:"DELETE",headers:{...authHeaders(token)}});setUpdates(p=>p.filter(x=>x.id!==u.id));} }} style={{ background:"none", border:"none", color:"#DC2626", cursor:"pointer", fontSize:12, padding:"2px 6px", opacity:0.5 }} onMouseEnter={e=>e.currentTarget.style.opacity="1"} onMouseLeave={e=>e.currentTarget.style.opacity="0.5"}>🗑</button>
+              <button onClick={async(e)=>{e.stopPropagation();if(!window.confirm("Delete Week "+weekNum+" data?"))return; const u=getUpdate(weekNum,year); if(u&&u.id){const delUrl=SUPA_URL+"/rest/v1/weekly_updates?id=eq."+u.id;await fetch(delUrl,{method:"DELETE",headers:authHeaders(token)});setUpdates(p=>p.filter(x=>x.id!==u.id));} }} style={{ background:"none", border:"none", color:"#DC2626", cursor:"pointer", fontSize:12, padding:"2px 6px", opacity:0.5 }} onMouseEnter={e=>e.currentTarget.style.opacity="1"} onMouseLeave={e=>e.currentTarget.style.opacity="0.5"}>🗑</button>
               <Chevron open={isOpen}/>
             </div>
 
@@ -764,7 +764,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
           <div style={{ width:50 }}><ProgressBar value={pct} color={market.color}/></div>
           <Chevron open={open}/>
         </div>
-        {isAdmin && <button onClick={async(e)=>{ e.stopPropagation(); if(!window.confirm(`Delete ${store.name} and all its data?`)) return; await sbDelete("stores",token,store.id); onDeleteStore&&onDeleteStore(store.id); }} style={{ ...btnGhost, fontSize:11, padding:"4px 9px", color:"#DC2626", background:"#FEF2F2", flexShrink:0, marginLeft:4 }}>🗑</button>}
+        {isAdmin && <button onClick={async(e)=>{ e.stopPropagation(); if(!window.confirm("Delete "+store.name+" and all its data?")) return; await sbDelete("stores",token,store.id); onDeleteStore&&onDeleteStore(store.id); }} style={{ ...btnGhost, fontSize:11, padding:"4px 9px", color:"#DC2626", background:"#FEF2F2", flexShrink:0, marginLeft:4 }}>🗑</button>}
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 10px 10px", overflow:"hidden", background:"#fff" }}>
@@ -882,7 +882,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
         </div>
         {isAdmin && <button onClick={()=>{ setEditForm({name:retailer.name,type:retailer.type}); setEditing(true); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", flexShrink:0 }}>✏️ Edit</button>}
         {isAdmin && <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>}
-        {isAdmin && <button onClick={async()=>{ if(!window.confirm(`Delete ${retailer.name} and all its data?`)) return; await sbDelete("retailers",token,retailer.id); onDeleteRetailer&&onDeleteRetailer(retailer.id); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:"#DC2626", background:"#FEF2F2", flexShrink:0 }}>🗑 Delete</button>}
+        {isAdmin && <button onClick={async()=>{ if(!window.confirm("Delete "+retailer.name+" and all its data?")) return; await sbDelete("retailers",token,retailer.id); onDeleteRetailer&&onDeleteRetailer(retailer.id); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:"#DC2626", background:"#FEF2F2", flexShrink:0 }}>🗑 Delete</button>}
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"12px", background:"#F8FAFC" }}>
@@ -982,7 +982,7 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
         </div>
         {isAdmin && !editingMkt && <>
           <button onClick={e=>{e.stopPropagation();setEditingMkt(true);setMktName(market.name);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px" }}>✏️</button>
-          <button onClick={async e=>{e.stopPropagation();if(!window.confirm(`Delete market "${market.name}" and ALL its data?`))return;await sbDelete("markets",token,market.id);onDeleteMarket&&onDeleteMarket(market.id);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px", color:"#DC2626", background:"#FEF2F2" }}>🗑</button>
+          <button onClick={async e=>{e.stopPropagation();if(!window.confirm("Delete market '"+market.name+"' and ALL its data?"))return;await sbDelete("markets",token,market.id);onDeleteMarket&&onDeleteMarket(market.id);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px", color:"#DC2626", background:"#FEF2F2" }}>🗑</button>
         </>}
         {isAdmin && <button onClick={e=>{e.stopPropagation();setAddingRet(true);}} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>}
       </div>
