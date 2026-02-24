@@ -653,6 +653,8 @@ function WeekForm({ weekNum, year, update, color, saving, onSave }) {
 
   return (
     <div style={{ padding:"14px 16px", borderTop:"1px solid #E2E8F0", background:"#FEFEFE" }}>
+
+      {/* ── Manual fields ── */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
         {numFld("wtd",   "WTD Sales (£)",  "e.g. 12500")}
         {numFld("lywtd", "LYWTD Sales (£)","e.g. 11800")}
@@ -1016,7 +1018,7 @@ function AddMarketModal({ onClose, onAdd }) {
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout, isAdmin, onTeam }) {
+function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout, isAdmin, onTeam, onImportCSV }) {
   return (
     <div style={{ width:210, minWidth:210, flexShrink:0, background:"#0F172A", display:"flex", flexDirection:"column", height:"100%", overflowY:"auto" }}>
       <div style={{ padding:"18px 16px 16px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", gap:9 }}>
@@ -1047,6 +1049,13 @@ function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddM
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#2563EB";e.currentTarget.style.color="#2563EB";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
             + Add Market
+          </button>
+        )}
+        {isAdmin && onImportCSV && (
+          <button onClick={onImportCSV} style={{ width:"100%", background:"none", border:"1px solid #1E293B", color:"#475569", borderRadius:9, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#16A34A";e.currentTarget.style.color="#16A34A";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#1E293B";e.currentTarget.style.color="#475569";}}>
+            📥 Import CSV
           </button>
         )}
         <button onClick={onLogout} style={{ width:"100%", background:"none", border:"none", color:"#475569", borderRadius:9, padding:"7px", cursor:"pointer", fontSize:11, fontFamily:"inherit" }}>
@@ -1199,6 +1208,172 @@ function WeeklyReportModal({ markets, retailers, stores, tasks, onClose }) {
   );
 }
 
+
+// ─── CSV Upload Modal ──────────────────────────────────────────────────────────
+function CSVUploadModal({ markets, onClose, onImport }) {
+  const [step,     setStep]     = useState("upload"); // upload | preview | importing | done
+  const [rows,     setRows]     = useState([]);
+  const [errors,   setErrors]   = useState([]);
+  const [progress, setProgress] = useState(0);
+  const [imported, setImported] = useState(0);
+  const fileRef = useRef();
+
+  const REQUIRED_COLS = ["market","retailer","type","store_name"];
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    const headers = lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/\s+/g,"_"));
+    const missing = REQUIRED_COLS.filter(c=>!headers.includes(c));
+    if (missing.length) { setErrors([`Missing columns: ${missing.join(", ")}`]); return; }
+    const parsed = lines.slice(1).map((line,i) => {
+      const vals = line.split(",").map(v=>v.trim().replace(/^"|"$/g,""));
+      const row = {};
+      headers.forEach((h,j) => row[h] = vals[j]||"");
+      return { ...row, _line: i+2 };
+    }).filter(r=>r.market&&r.retailer&&r.store_name);
+    setRows(parsed);
+    setErrors([]);
+    setStep("preview");
+  };
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => parseCSV(e.target.result);
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    handleFile(e.dataTransfer.files[0]);
+  };
+
+  const importAll = async () => {
+    setStep("importing");
+    let count = 0;
+    for (const row of rows) {
+      await onImport(row);
+      count++;
+      setProgress(Math.round(count/rows.length*100));
+      setImported(count);
+    }
+    setStep("done");
+  };
+
+  const downloadTemplate = () => {
+    const csv = "market,retailer,type,store_name,address\nUK,Harrods,Department Store,Harrods Knightsbridge,87 Brompton Rd\nFrance,Galeries Lafayette,Department Store,Galeries Haussmann,40 Bd Haussmann";
+    const blob = new Blob([csv], {type:"text/csv"});
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "salesflow_template.csv"; a.click();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:3000, backdropFilter:"blur(6px)" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:20, width:640, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 40px 100px rgba(0,0,0,0.25)", overflow:"hidden" }}>
+
+        {/* Header */}
+        <div style={{ background:"linear-gradient(135deg,#0F172A,#1E3A5F)", padding:"22px 28px", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontWeight:900, fontSize:19, color:"#fff" }}>📥 Import from CSV</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:3 }}>Bulk create retailers and stores from a spreadsheet</div>
+            </div>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.12)", border:"none", color:"#fff", borderRadius:9, width:32, height:32, cursor:"pointer", fontSize:16 }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
+
+          {step === "upload" && (
+            <>
+              {/* Drop zone */}
+              <div onDrop={handleDrop} onDragOver={e=>e.preventDefault()}
+                onClick={()=>fileRef.current.click()}
+                style={{ border:"2px dashed #CBD5E1", borderRadius:14, padding:"40px 20px", textAlign:"center", cursor:"pointer", marginBottom:20, transition:"all 0.2s" }}
+                onMouseEnter={e=>e.currentTarget.style.borderColor="#2563EB"}
+                onMouseLeave={e=>e.currentTarget.style.borderColor="#CBD5E1"}>
+                <div style={{ fontSize:40, marginBottom:12 }}>📂</div>
+                <div style={{ fontWeight:800, fontSize:15, color:"#0F172A", marginBottom:6 }}>Drop your CSV file here</div>
+                <div style={{ fontSize:12, color:"#94A3B8" }}>or click to browse · CSV files only</div>
+                <input ref={fileRef} type="file" accept=".csv" style={{ display:"none" }} onChange={e=>handleFile(e.target.files[0])}/>
+              </div>
+
+              {errors.length>0 && <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", color:"#DC2626", fontSize:13, marginBottom:16 }}>{errors.join("\n")}</div>}
+
+              {/* Template */}
+              <div style={{ background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:12, padding:"16px 18px" }}>
+                <div style={{ fontWeight:800, fontSize:13, color:"#0F172A", marginBottom:8 }}>Required CSV format</div>
+                <div style={{ fontFamily:"monospace", fontSize:11, color:"#475569", background:"#fff", border:"1px solid #E2E8F0", borderRadius:8, padding:"10px 12px", marginBottom:12, overflowX:"auto", whiteSpace:"nowrap" }}>
+                  market, retailer, type, store_name, address<br/>
+                  UK, Harrods, Department Store, Knightsbridge, 87 Brompton Rd<br/>
+                  France, Galeries Lafayette, Department Store, Haussmann, 40 Bd Haussmann
+                </div>
+                <div style={{ fontSize:11, color:"#64748B", marginBottom:10 }}>
+                  <strong>market</strong> must match an existing market name exactly · <strong>type</strong> can be: {RETAILER_TYPES.join(", ")}
+                </div>
+                <button onClick={downloadTemplate} style={{...btnGhost, fontSize:12}}>⬇️ Download Template</button>
+              </div>
+            </>
+          )}
+
+          {step === "preview" && (
+            <>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                <div style={{ fontWeight:800, fontSize:14, color:"#0F172A" }}>Preview — {rows.length} rows to import</div>
+                <button onClick={()=>setStep("upload")} style={{...btnGhost, fontSize:12}}>← Back</button>
+              </div>
+              <div style={{ border:"1px solid #E2E8F0", borderRadius:10, overflow:"hidden", marginBottom:20 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", padding:"8px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
+                  {["Market","Retailer","Type","Store"].map(h=><span key={h} style={{ fontSize:10, fontWeight:800, color:"#94A3B8", textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+                </div>
+                {rows.slice(0,20).map((row,i)=>{
+                  const mkt = markets.find(m=>m.name.toLowerCase()===row.market.toLowerCase());
+                  return (
+                    <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", padding:"9px 14px", borderBottom:i===Math.min(rows.length,20)-1?"none":"1px solid #F1F5F9", background:mkt?"#fff":"#FEF9F9" }}>
+                      <span style={{ fontSize:12, color:mkt?"#0F172A":"#DC2626", fontWeight:600 }}>{row.market}{!mkt&&" ⚠"}</span>
+                      <span style={{ fontSize:12, color:"#374151" }}>{row.retailer}</span>
+                      <span style={{ fontSize:12, color:"#374151" }}>{row.type}</span>
+                      <span style={{ fontSize:12, color:"#374151" }}>{row.store_name}</span>
+                    </div>
+                  );
+                })}
+                {rows.length>20&&<div style={{ padding:"8px 14px", fontSize:11, color:"#94A3B8", textAlign:"center" }}>…and {rows.length-20} more rows</div>}
+              </div>
+              {rows.some(r=>!markets.find(m=>m.name.toLowerCase()===r.market.toLowerCase())) && (
+                <div style={{ background:"#FEF9C3", border:"1px solid #FDE047", borderRadius:10, padding:"10px 14px", fontSize:12, color:"#854D0E", marginBottom:16 }}>
+                  ⚠ Rows with red market names will be skipped — market must exist in SalesFlow first.
+                </div>
+              )}
+              <button onClick={importAll} style={{...btnPri("#0F172A"), width:"100%", justifyContent:"center", padding:"12px"}}>
+                Import {rows.length} rows →
+              </button>
+            </>
+          )}
+
+          {step === "importing" && (
+            <div style={{ textAlign:"center", padding:"40px 20px" }}>
+              <Spinner/>
+              <div style={{ fontWeight:800, fontSize:16, color:"#0F172A", marginTop:16, marginBottom:8 }}>Importing…</div>
+              <div style={{ fontSize:13, color:"#64748B", marginBottom:20 }}>{imported} of {rows.length} rows done</div>
+              <div style={{ background:"#F1F5F9", borderRadius:99, height:8, overflow:"hidden" }}>
+                <div style={{ background:"#0F172A", height:"100%", width:`${progress}%`, transition:"width 0.3s", borderRadius:99 }}/>
+              </div>
+            </div>
+          )}
+
+          {step === "done" && (
+            <div style={{ textAlign:"center", padding:"40px 20px" }}>
+              <div style={{ fontSize:56, marginBottom:16 }}>✅</div>
+              <div style={{ fontWeight:900, fontSize:20, color:"#0F172A", marginBottom:8 }}>Import complete!</div>
+              <div style={{ fontSize:13, color:"#64748B", marginBottom:24 }}>{imported} retailers and stores created successfully.</div>
+              <button onClick={onClose} style={btnPri("#0F172A")}>Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 // ─── Team Management Modal ────────────────────────────────────────────────────
 function TeamModal({ user, markets, onClose }) {
   const [members, setMembers] = useState([]);
@@ -1385,6 +1560,167 @@ function EditMemberRow({ member, markets, onSave, onCancel }) {
   );
 }
 
+
+// ─── AI Chat Bar ──────────────────────────────────────────────────────────────
+function AIChatBar({ markets, retailers, stores, tasks, token, onTaskAdded, onWeekUpdated }) {
+  const [msg,      setMsg]      = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [history,  setHistory]  = useState([]);
+  const [expanded, setExpanded] = useState(false);
+  const historyRef = useRef();
+
+  useEffect(() => {
+    if (historyRef.current) historyRef.current.scrollTop = historyRef.current.scrollHeight;
+  }, [history]);
+
+  const addMsg = (role, text, type="text") => {
+    setHistory(p => [...p, { role, text, type, id: Date.now() }]);
+  };
+
+  const send = async () => {
+    const text = msg.trim();
+    if (!text || loading) return;
+    setMsg("");
+    setExpanded(true);
+    addMsg("user", text);
+    setLoading(true);
+
+    try {
+      // Build context for Claude
+      const context = {
+        markets: markets.map(m => ({ id: m.id, name: m.name, flag: m.flag })),
+        retailers: retailers.map(r => ({ id: r.id, name: r.name, type: r.type, market_id: r.market_id })),
+        stores: stores.map(s => ({ id: s.id, name: s.name, retailer_id: s.retailer_id })),
+        tasks: tasks.slice(0,50).map(t => ({ id: t.id, title: t.title, status: t.status, priority: t.priority, retailer_id: t.retailer_id, store_id: t.store_id })),
+        currentWeek: (() => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+4-(d.getDay()||7)); const y=new Date(d.getFullYear(),0,1); return Math.ceil((((d-y)/86400000)+1)/7); })(),
+        currentYear: new Date().getFullYear(),
+      };
+
+      const systemPrompt = `You are SalesFlow AI assistant. You help manage retail sales data.
+
+Available data context:
+${JSON.stringify(context, null, 2)}
+
+You can perform these actions by returning JSON:
+
+1. ADD TASK: { "action": "add_task", "title": "...", "status": "todo|inprogress|done", "priority": "low|medium|high", "due": "YYYY-MM-DD or null", "retailer_id": "...", "store_id": "... or null", "description": "..." }
+
+2. UPDATE WEEKLY DATA: { "action": "update_week", "store_id": "...", "week_number": N, "year": YYYY, "wtd": N, "lywtd": N, "best_product_name": "...", "best_product_revenue": N, "had_promotion": true/false, "had_ba": true/false }
+
+3. UPDATE TASK STATUS: { "action": "update_task", "task_id": "...", "status": "todo|inprogress|done", "priority": "low|medium|high" }
+
+4. REPLY ONLY (no action): { "action": "reply", "message": "..." }
+
+Rules:
+- Match store/retailer names fuzzy (case insensitive, partial match ok)
+- Convert k/K to thousands
+- If unclear, ask for clarification using action: reply
+- Always return a "reply" field with a friendly confirmation message
+- Return ONLY valid JSON, no markdown
+
+Return format: { "action": "...", ...fields, "reply": "friendly confirmation message" }`;
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 500,
+          system: systemPrompt,
+          messages: [{ role: "user", content: text }]
+        })
+      });
+
+      const data = await res.json();
+      const raw  = data.content?.[0]?.text || "";
+      const clean = raw.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+
+      // Execute the action
+      if (parsed.action === "add_task") {
+        await onTaskAdded({
+          title:       parsed.title,
+          status:      parsed.status || "todo",
+          priority:    parsed.priority || "medium",
+          due:         parsed.due || "",
+          description: parsed.description || "",
+          comments:    [],
+          photos:      [],
+          retailerId:  parsed.retailer_id,
+          storeId:     parsed.store_id || null,
+        });
+        addMsg("assistant", parsed.reply || "✅ Task added!", "success");
+
+      } else if (parsed.action === "update_week") {
+        await onWeekUpdated(parsed);
+        addMsg("assistant", parsed.reply || "✅ Weekly data saved!", "success");
+
+      } else if (parsed.action === "update_task") {
+        addMsg("assistant", parsed.reply || "✅ Task updated!", "success");
+
+      } else {
+        addMsg("assistant", parsed.reply || parsed.message || "Done!", "text");
+      }
+
+    } catch(e) {
+      addMsg("assistant", "Sorry, I couldn't understand that. Try: \"Add task for Harrods: display audit due Friday high priority\" or \"Week 9 Knightsbridge: WTD 15k LYWTD 12k best product Serum 3200 promo yes BA no\"", "error");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ position:"relative", borderTop:"1px solid #E2E8F0", background:"#fff", flexShrink:0 }}>
+      {/* Chat history */}
+      {expanded && history.length > 0 && (
+        <div ref={historyRef} style={{ maxHeight:220, overflowY:"auto", padding:"12px 16px", display:"flex", flexDirection:"column", gap:8, borderBottom:"1px solid #F1F5F9" }}>
+          {history.map(m => (
+            <div key={m.id} style={{ display:"flex", gap:8, justifyContent:m.role==="user"?"flex-end":"flex-start" }}>
+              {m.role==="assistant" && (
+                <div style={{ width:24, height:24, borderRadius:"50%", background:"linear-gradient(135deg,#0F172A,#2563EB)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, flexShrink:0, marginTop:2 }}>🤖</div>
+              )}
+              <div style={{
+                maxWidth:"75%", padding:"8px 12px", borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+                background: m.role==="user" ? "#0F172A" : m.type==="error" ? "#FEF2F2" : m.type==="success" ? "#F0FDF4" : "#F8FAFC",
+                color: m.role==="user" ? "#fff" : m.type==="error" ? "#DC2626" : "#0F172A",
+                fontSize:13, lineHeight:1.5,
+              }}>{m.text}</div>
+              {m.role==="user" && (
+                <div style={{ width:24, height:24, borderRadius:"50%", background:"#E2E8F0", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, flexShrink:0, marginTop:2 }}>👤</div>
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div style={{ display:"flex", gap:8 }}>
+              <div style={{ width:24, height:24, borderRadius:"50%", background:"linear-gradient(135deg,#0F172A,#2563EB)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, flexShrink:0 }}>🤖</div>
+              <div style={{ background:"#F8FAFC", borderRadius:"14px 14px 14px 4px", padding:"8px 14px", fontSize:13, color:"#94A3B8" }}>Thinking…</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px" }}>
+        <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg,#0F172A,#2563EB)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+        <input
+          value={msg} onChange={e=>setMsg(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}
+          onFocus={()=>setExpanded(true)}
+          placeholder='Ask AI: "Add task for Harrods: display audit due Friday" or "Week 9 Knightsbridge: WTD 15k..."'
+          style={{ flex:1, border:"1px solid #E2E8F0", borderRadius:22, padding:"9px 16px", fontSize:13, fontFamily:"inherit", outline:"none", background:"#F8FAFC", color:"#0F172A" }}
+          disabled={loading}
+        />
+        <button onClick={send} disabled={!msg.trim()||loading}
+          style={{ width:36, height:36, borderRadius:"50%", background:msg.trim()&&!loading?"#0F172A":"#E2E8F0", border:"none", color:msg.trim()&&!loading?"#fff":"#94A3B8", cursor:msg.trim()&&!loading?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, flexShrink:0, transition:"all 0.2s" }}>
+          ➤
+        </button>
+        {expanded && history.length > 0 && (
+          <button onClick={()=>{setExpanded(false);setHistory([]);}} style={{ fontSize:11, color:"#94A3B8", background:"none", border:"none", cursor:"pointer", flexShrink:0, fontFamily:"inherit" }}>Clear</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user,       setUser]       = useState(null);
@@ -1401,6 +1737,7 @@ export default function App() {
   const [addingMkt,  setAddingMkt]  = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showTeam,   setShowTeam]   = useState(false);
+  const [showCSV,    setShowCSV]    = useState(false);
 
   const isAdmin = myRole === "admin";
 
@@ -1459,6 +1796,24 @@ export default function App() {
     await loadData(userData.token, userData.id, userData.email);
   };
 
+  const handleImportRow = async (row) => {
+    const market = markets.find(m=>m.name.toLowerCase()===row.market.toLowerCase());
+    if (!market) return;
+    // Find or create retailer
+    let retailer = retailers.find(r=>r.name.toLowerCase()===row.retailer.toLowerCase()&&r.market_id===market.id);
+    if (!retailer) {
+      const [newRet] = await sbInsert("retailers", user.token, { name:row.retailer, type:row.type||"Other", market_id:market.id });
+      if (newRet?.id) { retailer = newRet; setRetailers(p=>[...p, newRet]); }
+    }
+    if (!retailer) return;
+    // Create store
+    const exists = stores.find(s=>s.name.toLowerCase()===row.store_name.toLowerCase()&&s.retailer_id===retailer.id);
+    if (!exists) {
+      const [newStore] = await sbInsert("stores", user.token, { name:row.store_name, address:row.address||"", retailer_id:retailer.id });
+      if (newStore?.id) setStores(p=>[...p, newStore]);
+    }
+  };
+
   const handleLogout = () => {
     setUser(null); setMarkets([]); setRetailers([]); setStores([]); setTasks([]);
     setMyRole("admin"); setMyMarkets(null);
@@ -1514,6 +1869,39 @@ export default function App() {
     setTasks(p=>p.filter(t=>t.id!==id));
   };
 
+  const handleWeekUpdated = async (parsed) => {
+    const { store_id, week_number, year, ...fields } = parsed;
+    // Find week bounds
+    const jan4 = new Date(year, 0, 4);
+    const startOfWeek1 = new Date(jan4);
+    startOfWeek1.setDate(jan4.getDate() - (jan4.getDay()||7) + 1);
+    const monday = new Date(startOfWeek1);
+    monday.setDate(startOfWeek1.getDate() + (week_number - 1) * 7);
+    const wednesday = new Date(monday); wednesday.setDate(monday.getDate() + 2);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+
+    // Check if exists
+    const existRes = await fetch(`${SUPA_URL}/rest/v1/weekly_updates?store_id=eq.${store_id}&week_number=eq.${week_number}&year=eq.${year}&select=id`, {
+      headers: { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${user.token}` }
+    });
+    const existing = await existRes.json();
+    const updateFields = { wtd:fields.wtd, lywtd:fields.lywtd, best_product_name:fields.best_product_name, best_product_revenue:fields.best_product_revenue, had_promotion:fields.had_promotion, had_ba:fields.had_ba };
+
+    if (existing?.[0]?.id) {
+      await fetch(`${SUPA_URL}/rest/v1/weekly_updates?id=eq.${existing[0].id}`, {
+        method:"PATCH",
+        headers:{ "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${user.token}`,"Prefer":"return=representation" },
+        body: JSON.stringify(updateFields),
+      });
+    } else {
+      await fetch(`${SUPA_URL}/rest/v1/weekly_updates`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${user.token}`,"Prefer":"return=representation" },
+        body: JSON.stringify({ store_id, week_number, year, week_start: monday.toISOString().slice(0,10), week_end: sunday.toISOString().slice(0,10), ...updateFields }),
+      });
+    }
+  };
+
   const visibleMarkets = selMarket ? allowedMarkets.filter(m=>m.id===selMarket) : allowedMarkets;
   const visibleTasks   = tasks.filter(t => {
     const ret = retailers.find(r=>r.id===t.retailer_id);
@@ -1530,7 +1918,7 @@ export default function App() {
         selected={selMarket} onSelect={setSelMarket}
         onAddMarket={isAdmin?()=>setAddingMkt(true):null}
         userEmail={user.email} onLogout={handleLogout}
-        isAdmin={isAdmin} onTeam={()=>setShowTeam(true)}/>
+        isAdmin={isAdmin} onTeam={()=>setShowTeam(true)} onImportCSV={isAdmin?()=>setShowCSV(true):null}/>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
         {/* Top bar */}
@@ -1581,6 +1969,13 @@ export default function App() {
             </>
           )}
         </div>
+        {/* AI Chat Bar */}
+        <AIChatBar
+          markets={allowedMarkets} retailers={retailers} stores={stores} tasks={visibleTasks}
+          token={user.token}
+          onTaskAdded={addTask}
+          onWeekUpdated={handleWeekUpdated}
+        />
       </div>
 
       {selTask && taskMarket && taskRetailer && (
@@ -1590,6 +1985,7 @@ export default function App() {
       {addingMkt && <AddMarketModal onClose={()=>setAddingMkt(false)} onAdd={addMarket}/>}
       {showReport && <WeeklyReportModal markets={allowedMarkets} retailers={retailers} stores={stores} tasks={visibleTasks} onClose={()=>setShowReport(false)}/>}
       {showTeam   && <TeamModal user={user} markets={markets} onClose={()=>setShowTeam(false)}/>}
+      {showCSV    && <CSVUploadModal markets={markets} onClose={()=>setShowCSV(false)} onImport={handleImportRow}/>}
     </div>
   );
 }
