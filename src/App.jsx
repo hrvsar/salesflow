@@ -1251,18 +1251,15 @@ function ProductsCSVModal({ onClose, onImport }) {
   const fileRef = useRef();
 
   const parseCSV = (text) => {
-    const lines = text.trim().split(/
-?
-/).filter(l=>l.trim());
+    const lines = text.trim().split(/[\r\n]+/).filter(l=>l.trim());
     const rawHeaders = lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,""));
-    const headers = rawHeaders.map(h=>h.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""));
+    const headers = rawHeaders.map(h=>h.toLowerCase().replace(/ +/g,"_").replace(/[^a-z0-9_]/g,""));
     if (!headers.includes("name") && !headers.includes("product_name")) {
       setErrors([`Missing 'name' column. Your columns: ${rawHeaders.join(", ")}`]); return;
     }
     const nameCol = headers.includes("name") ? "name" : "product_name";
     const parsed = lines.slice(1).map((line,i) => {
-      const vals = line.split(",").map(v=>v.trim().replace(/^"|"$/g,"").replace(/
-/g,""));
+      const vals = line.split(",").map(v=>v.trim().replace(/^"|"$/g,"").replace(/\r/g,""));
       const row = {};
       headers.forEach((h,j) => row[h] = vals[j]||"");
       return { name: row[nameCol]||row.name, sku: row.sku||row.product_code||"", _line: i+2 };
@@ -1402,7 +1399,7 @@ function CSVUploadModal({ markets, onClose, onImport }) {
     const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
     const rawHeaders = lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,""));
     // Normalize headers: lowercase, spaces to underscores
-    const headers = rawHeaders.map(h=>h.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""));
+    const headers = rawHeaders.map(h=>h.toLowerCase().replace(/ +/g,"_").replace(/[^a-z0-9_]/g,""));
     const missing = REQUIRED_COLS.filter(c=>!headers.includes(c));
     if (missing.length) { setErrors([`Missing columns: ${missing.join(", ")}. Your columns: ${rawHeaders.join(", ")}`]); return; }
     const parsed = lines.slice(1).map((line,i) => {
