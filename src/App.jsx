@@ -938,11 +938,23 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
 }
 
 // ─── Market Section ───────────────────────────────────────────────────────────
-function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, onDeleteRetailer, onDeleteStore, onDeleteTask, token, isAdmin, products }) {
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, onDeleteRetailer, onDeleteStore, onDeleteTask, onDeleteMarket, token, isAdmin, products }) {
   const [open,       setOpen]       = useState(true);
   const [addingRet,  setAddingRet]  = useState(false);
   const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
   const [savingRet,  setSavingRet]  = useState(false);
+  const [editingMkt, setEditingMkt] = useState(false);
+  const [mktName,    setMktName]    = useState(market.name);
+  const [savingMkt,  setSavingMkt]  = useState(false);
+
+  const saveMktName = async () => {
+    if (!mktName.trim() || mktName.trim()===market.name) { setEditingMkt(false); return; }
+    setSavingMkt(true);
+    await sbUpdate("markets", token, market.id, { name: mktName.trim() });
+    market.name = mktName.trim();
+    setSavingMkt(false);
+    setEditingMkt(false);
+  };
 
   const myRets   = retailers.filter(r=>(r.market_id||r.marketId)===market.id);
   const myStores = stores.filter(s=>myRets.some(r=>r.id===(s.retailer_id||s.retailerId)));
@@ -967,8 +979,20 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           </div>
           <span style={{ color:"#CBD5E1", fontSize:12, marginLeft:4, display:"inline-block", transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
         </div>
-        {isAdmin && <button onClick={()=>setAddingRet(true)} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>}
+        </div>
+        {isAdmin && !editingMkt && <>
+          <button onClick={e=>{e.stopPropagation();setEditingMkt(true);setMktName(market.name);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px" }}>✏️</button>
+          <button onClick={async e=>{e.stopPropagation();if(!window.confirm(`Delete market "${market.name}" and ALL its data?`))return;await sbDelete("markets",token,market.id);onDeleteMarket&&onDeleteMarket(market.id);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px", color:"#DC2626", background:"#FEF2F2" }}>🗑</button>
+        </>}
+        {isAdmin && <button onClick={e=>{e.stopPropagation();setAddingRet(true);}} style={{ ...btnGhost, fontSize:12, color:market.color, background:market.color+"12", border:`1px solid ${market.color}33` }}>+ Retailer</button>}
       </div>
+      {editingMkt && (
+        <div style={{ display:"flex", gap:8, padding:"10px 14px", background:"#F8FAFC", border:"1px solid #E2E8F0", borderRadius:10, marginBottom:8, alignItems:"center" }}>
+          <input value={mktName} onChange={e=>setMktName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveMktName();if(e.key==="Escape")setEditingMkt(false);}} autoFocus style={{...inputSt, flex:1}}/>
+          <button onClick={saveMktName} disabled={savingMkt} style={{...btnPri(market.color), opacity:savingMkt?0.7:1}}>{savingMkt?"Saving…":"Save"}</button>
+          <button onClick={()=>setEditingMkt(false)} style={btnGhost}>Cancel</button>
+        </div>
+      )}
       {open && (
         <div style={{ paddingLeft:48 }}>
           {addingRet && (
@@ -1908,6 +1932,15 @@ export default function App() {
     setTasks(p=>p.filter(t=>t.id!==id));
   };
 
+  const deleteMarket = async (id) => {
+    await sbDelete("markets", user.token, id);
+    setMarkets(p=>p.filter(m=>m.id!==id));
+    const retIds = retailers.filter(r=>r.market_id===id).map(r=>r.id);
+    setRetailers(p=>p.filter(r=>r.market_id!==id));
+    setStores(p=>p.filter(s=>!retIds.includes(s.retailer_id)));
+    setTasks(p=>p.filter(t=>!retIds.includes(t.retailer_id)));
+  };
+
   const deleteRetailer = async (id) => {
     await sbDelete("retailers", user.token, id);
     setRetailers(p=>p.filter(r=>r.id!==id));
@@ -1982,7 +2015,7 @@ export default function App() {
               )}
               {visibleMarkets.map(market=>(
                 <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
-                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} onDeleteRetailer={deleteRetailer} onDeleteStore={deleteStore} onDeleteTask={deleteTask} token={user.token} isAdmin={isAdmin} products={products}/>
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} onDeleteRetailer={deleteRetailer} onDeleteStore={deleteStore} onDeleteTask={deleteTask} onDeleteMarket={deleteMarket} token={user.token} isAdmin={isAdmin} products={products}/>
               ))}
             </>
           )}
