@@ -434,7 +434,12 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
             <div key={task.id}
               style={{ display:"grid", gridTemplateColumns:"1fr 130px 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
               onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-              <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button onClick={async(e)=>{e.stopPropagation();const ns=task.status==="done"?"todo":"done";await onToggleDone(task.id,ns);}} style={{ width:20,height:20,borderRadius:"50%",border:task.status==="done"?"none":"2px solid #CBD5E1",background:task.status==="done"?"#16A34A":"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s" }}>
+                  {task.status==="done"&&<span style={{color:"#fff",fontSize:11,lineHeight:1}}>✓</span>}
+                </button>
+                <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
+              </div>
               <span style={{ fontSize:11, color:"#6366F1", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{task.assignee||<span style={{color:"#CBD5E1"}}>—</span>}</span>
               <StatusPill status={task.status} />
               <PriorityDot priority={task.priority} />
@@ -783,7 +788,12 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
                 <div key={task.id}
                   style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
                   onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-                  <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <button onClick={async(e)=>{e.stopPropagation();const ns=task.status==="done"?"todo":"done";await onToggleDone(task.id,ns);}} style={{ width:20,height:20,borderRadius:"50%",border:task.status==="done"?"none":"2px solid #CBD5E1",background:task.status==="done"?"#16A34A":"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s" }}>
+                      {task.status==="done"&&<span style={{color:"#fff",fontSize:11,lineHeight:1}}>✓</span>}
+                    </button>
+                    <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
+                  </div>
                   <StatusPill status={task.status}/>
                   <PriorityDot priority={task.priority}/>
                   <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
@@ -838,7 +848,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
 }
 
 // ─── Retailer Block ───────────────────────────────────────────────────────────
-function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onDeleteRetailer, onDeleteStore, onDeleteTask, token, isAdmin, products }) {
+function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onDeleteRetailer, onDeleteStore, onDeleteTask, onToggleDone, token, isAdmin, products }) {
   const [open,         setOpen]         = useState(true);
   const [addingStore,  setAddingStore]  = useState(false);
   const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
@@ -933,7 +943,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
           )}
           {myStores.map(store=>(
             <div key={store.id} style={{ marginTop:8 }}>
-              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onDeleteStore={onDeleteStore} onDeleteTask={onDeleteTask} token={token} isAdmin={isAdmin} products={products}/>
+              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onDeleteStore={onDeleteStore} onDeleteTask={onDeleteTask} onToggleDone={onToggleDone} token={token} isAdmin={isAdmin} products={products}/>
             </div>
           ))}
         </div>
@@ -943,7 +953,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
 }
 
 // ─── Market Section ───────────────────────────────────────────────────────────
-function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, onDeleteRetailer, onDeleteStore, onDeleteTask, onDeleteMarket, token, isAdmin, products }) {
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, onDeleteRetailer, onDeleteStore, onDeleteTask, onDeleteMarket, onToggleDone, token, isAdmin, products }) {
   const [open,       setOpen]       = useState(true);
   const [addingRet,  setAddingRet]  = useState(false);
   const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
@@ -1937,6 +1947,11 @@ export default function App() {
     setTasks(p=>p.filter(t=>t.id!==id));
   };
 
+  const toggleTaskDone = async (id, newStatus) => {
+    await sbUpdate("tasks", user.token, id, { status: newStatus });
+    setTasks(p => p.map(t => t.id === id ? { ...t, status: newStatus } : t));
+  };
+
   const deleteMarket = async (id) => {
     await sbDelete("markets", user.token, id);
     setMarkets(p=>p.filter(m=>m.id!==id));
@@ -2020,7 +2035,7 @@ export default function App() {
               )}
               {visibleMarkets.map(market=>(
                 <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
-                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} onDeleteRetailer={deleteRetailer} onDeleteStore={deleteStore} onDeleteTask={deleteTask} onDeleteMarket={deleteMarket} token={user.token} isAdmin={isAdmin} products={products}/>
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} onDeleteRetailer={deleteRetailer} onDeleteStore={deleteStore} onDeleteTask={deleteTask} onDeleteMarket={deleteMarket} onToggleDone={toggleTaskDone} token={user.token} isAdmin={isAdmin} products={products}/>
               ))}
             </>
           )}
