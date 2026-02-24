@@ -1600,74 +1600,97 @@ function AIChatBar({ markets, retailers, stores, tasks, token, onTaskAdded, onWe
         currentYear: new Date().getFullYear(),
       };
 
-      const systemPrompt = `You are SalesFlow AI assistant. You help manage retail sales data.
+      const systemPrompt = `You are SalesFlow AI assistant helping manage retail sales tasks and weekly store data.
 
-Available data context:
-${JSON.stringify(context, null, 2)}
+AVAILABLE DATA:
+Markets: ${context.markets.map(m=>m.name).join(", ")}
+Retailers: ${context.retailers.map(r=>r.name+" (type:"+r.type+", id:"+r.id+")").join(" | ")}
+Stores: ${context.stores.map(s=>s.name+" (id:"+s.id+", retailer_id:"+s.retailer_id+")").join(" | ")}
+Current week: ${context.currentWeek}, Year: ${context.currentYear}
 
-You can perform these actions by returning JSON:
+Return ONE JSON object. Choose the right action:
 
-1. ADD TASK: { "action": "add_task", "title": "...", "status": "todo|inprogress|done", "priority": "low|medium|high", "due": "YYYY-MM-DD or null", "retailer_id": "...", "store_id": "... or null", "description": "..." }
+1. Add a task for a retailer or store:
+{"action":"add_task","title":"task title","status":"todo","priority":"medium","due":null,"retailer_id":"id-from-above","store_id":null,"retailer_name":"name used for fuzzy match","store_name":"name for fuzzy","description":"","reply":"friendly confirmation"}
 
-2. UPDATE WEEKLY DATA: { "action": "update_week", "store_id": "...", "week_number": N, "year": YYYY, "wtd": N, "lywtd": N, "best_product_name": "...", "best_product_revenue": N, "had_promotion": true/false, "had_ba": true/false }
+2. Update weekly store data:
+{"action":"update_week","store_id":"id-from-above","store_name":"name for fuzzy","week_number":${context.currentWeek},"year":${context.currentYear},"wtd":null,"lywtd":null,"best_product_name":null,"best_product_revenue":null,"had_promotion":null,"had_ba":null,"reply":"confirmation"}
 
-3. UPDATE TASK STATUS: { "action": "update_task", "task_id": "...", "status": "todo|inprogress|done", "priority": "low|medium|high" }
+3. Just reply:
+{"action":"reply","reply":"your response"}
 
-4. REPLY ONLY (no action): { "action": "reply", "message": "..." }
-
-Rules:
-- Match store/retailer names fuzzy (case insensitive, partial match ok)
-- Convert k/K to thousands
-- If unclear, ask for clarification using action: reply
-- Always return a "reply" field with a friendly confirmation message
-- Return ONLY valid JSON, no markdown
-
-Return format: { "action": "...", ...fields, "reply": "friendly confirmation message" }`;
+RULES:
+- Use retailer/store IDs from the data above when you can match the name
+- Also include retailer_name/store_name for fuzzy fallback matching
+- Convert k/K to thousands (15k = 15000)
+- Use null for fields not mentioned
+- Return ONLY the raw JSON, no markdown, no extra text`;
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type":"application/json", "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 500,
+          max_tokens: 600,
           system: systemPrompt,
           messages: [{ role: "user", content: text }]
         })
       });
 
       const data = await res.json();
-      const raw  = data.content?.[0]?.text || "";
-      const clean = raw.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      if (!res.ok) throw new Error(data?.error?.message || "API error " + res.status);
+      
+      const raw   = data.content?.[0]?.text || "";
+      const clean = raw.replace(/```json[\s\S]*?```|```[\s\S]*?```/g, m => m.replace(/```json|```/g,"")).replace(/```/g,"").trim();
+      
+      // Extract JSON even if Claude adds extra text
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON in response: " + raw.slice(0,100));
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Fuzzy match retailer/store by name if IDs not found
+      const findRetailer = (name) => {
+        if (!name) return null;
+        return retailers.find(r => r.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(r.name.toLowerCase()));
+      };
+      const findStore = (name) => {
+        if (!name) return null;
+        return stores.find(s => s.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(s.name.toLowerCase()));
+      };
 
       // Execute the action
       if (parsed.action === "add_task") {
-        await onTaskAdded({
-          title:       parsed.title,
-          status:      parsed.status || "todo",
-          priority:    parsed.priority || "medium",
-          due:         parsed.due || "",
-          description: parsed.description || "",
-          comments:    [],
-          photos:      [],
-          retailerId:  parsed.retailer_id,
-          storeId:     parsed.store_id || null,
-        });
+        // Try to resolve retailer_id from name if needed
+        let retailerId = parsed.retailer_id;
+        let storeId    = parsed.store_id || null;
+        if (!retailerId && parsed.retailer_name) {
+          const r = findRetailer(parsed.retailer_name);
+          if (r) retailerId = r.id;
+        }
+        if (!storeId && parsed.store_name) {
+          const s = findStore(parsed.store_name);
+          if (s) { storeId = s.id; if (!retailerId) retailerId = s.retailer_id; }
+        }
+        if (!retailerId) { addMsg("assistant", "I couldn't find that retailer. Please check the name and try again.", "error"); setLoading(false); return; }
+        await onTaskAdded({ title:parsed.title, status:parsed.status||"todo", priority:parsed.priority||"medium", due:parsed.due||"", description:parsed.description||"", comments:[], photos:[], retailerId, storeId });
         addMsg("assistant", parsed.reply || "✅ Task added!", "success");
 
       } else if (parsed.action === "update_week") {
-        await onWeekUpdated(parsed);
+        let storeId = parsed.store_id;
+        if (!storeId && parsed.store_name) {
+          const s = findStore(parsed.store_name);
+          if (s) storeId = s.id;
+        }
+        if (!storeId) { addMsg("assistant", "I couldn't find that store. Please check the name and try again.", "error"); setLoading(false); return; }
+        await onWeekUpdated({...parsed, store_id: storeId});
         addMsg("assistant", parsed.reply || "✅ Weekly data saved!", "success");
 
-      } else if (parsed.action === "update_task") {
-        addMsg("assistant", parsed.reply || "✅ Task updated!", "success");
-
       } else {
-        addMsg("assistant", parsed.reply || parsed.message || "Done!", "text");
+        addMsg("assistant", parsed.reply || parsed.message || raw || "Done!", "text");
       }
 
     } catch(e) {
-      addMsg("assistant", "Sorry, I couldn't understand that. Try: \"Add task for Harrods: display audit due Friday high priority\" or \"Week 9 Knightsbridge: WTD 15k LYWTD 12k best product Serum 3200 promo yes BA no\"", "error");
+      addMsg("assistant", "Error: " + (e.message || "Unknown error. Please try again."), "error");
     }
     setLoading(false);
   };
