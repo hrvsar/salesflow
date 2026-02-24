@@ -424,18 +424,19 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderRadius:10, overflow:"hidden", background:"#fff" }}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"6px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
-            {["Task","Status","Priority","Due",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+            {["Task","Status","Priority","Due","",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
           </div>
           {tasks.length===0&&!adding&&<div style={{ padding:"12px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No account-level tasks yet</div>}
           {tasks.map((task,i)=>(
-            <div key={task.id} onClick={()=>onTaskClick(task)}
-              style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"10px 14px", cursor:"pointer", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s" }}
+            <div key={task.id}
+              style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
               onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-              <span style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none" }}>{task.title}</span>
+              <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
               <StatusPill status={task.status} />
               <PriorityDot priority={task.priority} />
               <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
               <span style={{ fontSize:11, color:"#94A3B8" }}>{(task.photos||[]).length>0&&`📷${task.photos.length}`}</span>
+              <button onClick={async(e)=>{e.stopPropagation();if(!window.confirm("Delete this task?"))return;onDeleteTask&&onDeleteTask(task.id);}} style={{ background:"none", border:"none", color:"#DC2626", cursor:"pointer", fontSize:13, padding:"2px 4px", opacity:0.5, fontFamily:"inherit" }} onMouseEnter={e=>e.currentTarget.style.opacity="1"} onMouseLeave={e=>e.currentTarget.style.opacity="0.5"}>🗑</button>
             </div>
           ))}
           {adding && (
@@ -604,6 +605,7 @@ function WeeklyUpdatesSection({ store, token, color, products }) {
                 <div style={{ fontSize:11, color:"#94A3B8" }}>{bounds.label} · Due {bounds.due}</div>
               </div>
               <span style={{ fontSize:10, background:statusBg, color:statusColor, borderRadius:20, padding:"2px 10px", fontWeight:700 }}>{statusLabel}</span>
+              <button onClick={async(e)=>{e.stopPropagation();if(!window.confirm(`Delete Week ${weekNum} data?`))return; const u=getUpdate(weekNum,year); if(u?.id){await fetch(`${SUPA_URL}/rest/v1/weekly_updates?id=eq.${u.id}`,{method:"DELETE",headers:{...authHeaders(token)}});setUpdates(p=>p.filter(x=>x.id!==u.id));} }} style={{ background:"none", border:"none", color:"#DC2626", cursor:"pointer", fontSize:12, padding:"2px 6px", opacity:0.5 }} onMouseEnter={e=>e.currentTarget.style.opacity="1"} onMouseLeave={e=>e.currentTarget.style.opacity="0.5"}>🗑</button>
               <Chevron open={isOpen}/>
             </div>
 
@@ -744,40 +746,44 @@ function WeekSummary({ update, color }) {
 }
 
 // ─── Store Block ──────────────────────────────────────────────────────────────
-function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTask, token, products }) {
+function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTask, onDeleteStore, token, isAdmin, products }) {
   const [open, setOpen] = useState(true);
   const myTasks = tasks.filter(t=>t.store_id===store.id||t.storeId===store.id);
   const done = myTasks.filter(t=>t.status==="done").length;
   const pct  = myTasks.length?Math.round(done/myTasks.length*100):0;
   return (
     <div style={{ marginBottom:8 }}>
-      <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 14px", background:"#fff", border:"1px solid #E2E8F0", borderRadius:open?"10px 10px 0 0":"10px", cursor:"pointer", userSelect:"none", borderLeft:`3px solid ${market.color}88` }}>
-        <span style={{ fontSize:13 }}>🏬</span>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontWeight:700, fontSize:13, color:"#0F172A", marginBottom:2 }}>{store.name}</div>
-          {store.address&&<div style={{ fontSize:11, color:"#94A3B8" }}>{store.address}</div>}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 14px", background:"#fff", border:"1px solid #E2E8F0", borderRadius:open?"10px 10px 0 0":"10px", userSelect:"none", borderLeft:`3px solid ${market.color}88` }}>
+        <div onClick={()=>setOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, flex:1, cursor:"pointer", minWidth:0 }}>
+          <span style={{ fontSize:13 }}>🏬</span>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:"#0F172A", marginBottom:2 }}>{store.name}</div>
+            {store.address&&<div style={{ fontSize:11, color:"#94A3B8" }}>{store.address}</div>}
+          </div>
+          <span style={{ fontSize:11, color:"#94A3B8", marginRight:6 }}>{done}/{myTasks.length} done</span>
+          <div style={{ width:50 }}><ProgressBar value={pct} color={market.color}/></div>
+          <Chevron open={open}/>
         </div>
-        <span style={{ fontSize:11, color:"#94A3B8", marginRight:6 }}>{done}/{myTasks.length} done</span>
-        <div style={{ width:50 }}><ProgressBar value={pct} color={market.color}/></div>
-        <Chevron open={open}/>
+        {isAdmin && <button onClick={async(e)=>{ e.stopPropagation(); if(!window.confirm(`Delete ${store.name} and all its data?`)) return; await sbDelete("stores",token,store.id); onDeleteStore&&onDeleteStore(store.id); }} style={{ ...btnGhost, fontSize:11, padding:"4px 9px", color:"#DC2626", background:"#FEF2F2", flexShrink:0, marginLeft:4 }}>🗑</button>}
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 10px 10px", overflow:"hidden", background:"#fff" }}>
           {view==="list" ? (
             <>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"6px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
-                {["Task","Status","Priority","Due",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+                {["Task","Status","Priority","Due","",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
               </div>
               {myTasks.length===0&&<div style={{ padding:"14px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No tasks yet</div>}
               {myTasks.map((task,i)=>(
-                <div key={task.id} onClick={()=>onTaskClick(task)}
-                  style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"10px 14px", cursor:"pointer", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s" }}
+                <div key={task.id}
+                  style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
                   onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-                  <span style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none" }}>{task.title}</span>
+                  <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
                   <StatusPill status={task.status}/>
                   <PriorityDot priority={task.priority}/>
                   <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
                   <span style={{ fontSize:11, color:"#94A3B8" }}>{(task.photos||[]).length>0&&`📷${task.photos.length}`}</span>
+                  <button onClick={async(e)=>{e.stopPropagation();if(!window.confirm("Delete this task?"))return;onDeleteTask&&onDeleteTask(task.id);}} style={{ background:"none", border:"none", color:"#DC2626", cursor:"pointer", fontSize:13, padding:"2px 4px", opacity:0.5, fontFamily:"inherit" }} onMouseEnter={e=>e.currentTarget.style.opacity="1"} onMouseLeave={e=>e.currentTarget.style.opacity="0.5"}>🗑</button>
                 </div>
               ))}
             </>
@@ -827,7 +833,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
 }
 
 // ─── Retailer Block ───────────────────────────────────────────────────────────
-function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, token, isAdmin, products }) {
+function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onDeleteRetailer, onDeleteStore, onDeleteTask, token, isAdmin, products }) {
   const [open,         setOpen]         = useState(true);
   const [addingStore,  setAddingStore]  = useState(false);
   const [storeForm,    setStoreForm]    = useState({ name:"", address:"" });
@@ -876,6 +882,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
         </div>
         {isAdmin && <button onClick={()=>{ setEditForm({name:retailer.name,type:retailer.type}); setEditing(true); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", flexShrink:0 }}>✏️ Edit</button>}
         {isAdmin && <button onClick={()=>setAddingStore(true)} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:market.color, background:market.color+"12", border:`1px solid ${market.color}33`, flexShrink:0 }}>+ Store</button>}
+        {isAdmin && <button onClick={async()=>{ if(!window.confirm(`Delete ${retailer.name} and all its data?`)) return; await sbDelete("retailers",token,retailer.id); onDeleteRetailer&&onDeleteRetailer(retailer.id); }} style={{ ...btnGhost, fontSize:11, padding:"5px 11px", color:"#DC2626", background:"#FEF2F2", flexShrink:0 }}>🗑 Delete</button>}
       </div>
       {open && (
         <div style={{ border:"1px solid #E2E8F0", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"12px", background:"#F8FAFC" }}>
@@ -921,7 +928,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
           )}
           {myStores.map(store=>(
             <div key={store.id} style={{ marginTop:8 }}>
-              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} token={token} products={products}/>
+              <StoreBlock store={store} retailer={retailer} market={market} tasks={storeTasks} view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onDeleteStore={onDeleteStore} onDeleteTask={onDeleteTask} token={token} isAdmin={isAdmin} products={products}/>
             </div>
           ))}
         </div>
@@ -931,7 +938,7 @@ function RetailerBlock({ retailer, market, stores, tasks, view, onTaskClick, onA
 }
 
 // ─── Market Section ───────────────────────────────────────────────────────────
-function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, token, isAdmin, products }) {
+function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, onAddTask, onAddStore, onAddRetailer, onDeleteRetailer, onDeleteStore, onDeleteTask, token, isAdmin, products }) {
   const [open,       setOpen]       = useState(true);
   const [addingRet,  setAddingRet]  = useState(false);
   const [retForm,    setRetForm]    = useState({ name:"", type:"Department Store" });
@@ -988,7 +995,7 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           )}
           {myRets.map(ret=>(
             <RetailerBlock key={ret.id} retailer={ret} market={market} stores={stores} tasks={tasks}
-              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer} token={token} isAdmin={isAdmin} products={products}/>
+              view={view} onTaskClick={onTaskClick} onAddTask={onAddTask} onAddStore={onAddStore} onAddRetailer={onAddRetailer} onDeleteRetailer={onDeleteRetailer} onDeleteStore={onDeleteStore} onDeleteTask={onDeleteTask} token={token} isAdmin={isAdmin} products={products}/>
           ))}
         </div>
       )}
@@ -1900,6 +1907,19 @@ export default function App() {
     await sbDelete("tasks", user.token, id);
     setTasks(p=>p.filter(t=>t.id!==id));
   };
+
+  const deleteRetailer = async (id) => {
+    await sbDelete("retailers", user.token, id);
+    setRetailers(p=>p.filter(r=>r.id!==id));
+    setStores(p=>p.filter(s=>s.retailer_id!==id));
+    setTasks(p=>p.filter(t=>t.retailer_id!==id));
+  };
+
+  const deleteStore = async (id) => {
+    await sbDelete("stores", user.token, id);
+    setStores(p=>p.filter(s=>s.id!==id));
+    setTasks(p=>p.filter(t=>t.store_id!==id));
+  };
   const visibleMarkets = selMarket ? allowedMarkets.filter(m=>m.id===selMarket) : allowedMarkets;
   const visibleTasks   = tasks.filter(t => {
     const ret = retailers.find(r=>r.id===t.retailer_id);
@@ -1962,7 +1982,7 @@ export default function App() {
               )}
               {visibleMarkets.map(market=>(
                 <MarketSection key={market.id} market={market} retailers={retailers} stores={stores} tasks={tasks}
-                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} token={user.token} isAdmin={isAdmin} products={products}/>
+                  view={view} onTaskClick={setSelTask} onAddTask={addTask} onAddStore={addStore} onAddRetailer={addRetailer} onDeleteRetailer={deleteRetailer} onDeleteStore={deleteStore} onDeleteTask={deleteTask} token={user.token} isAdmin={isAdmin} products={products}/>
               ))}
             </>
           )}
