@@ -792,7 +792,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
             </div>
           )}
           <AddTaskInline storeId={store.id} retailerId={retailer.id} color={market.color} onAdd={onAddTask}/>
-          {(retailer.type==="Department Store") && (
+          {(retailer.type?.toLowerCase()==="department store") && (
             <WeeklyUpdatesSection store={store} token={token} color={market.color}/>
           )}
         </div>
@@ -1221,14 +1221,18 @@ function CSVUploadModal({ markets, onClose, onImport }) {
   const REQUIRED_COLS = ["market","retailer","type","store_name"];
 
   const parseCSV = (text) => {
-    const lines = text.trim().split("\n").filter(l=>l.trim());
-    const headers = lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/\s+/g,"_"));
+    const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
+    const rawHeaders = lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,""));
+    // Normalize headers: lowercase, spaces to underscores
+    const headers = rawHeaders.map(h=>h.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""));
     const missing = REQUIRED_COLS.filter(c=>!headers.includes(c));
-    if (missing.length) { setErrors([`Missing columns: ${missing.join(", ")}`]); return; }
+    if (missing.length) { setErrors([`Missing columns: ${missing.join(", ")}. Your columns: ${rawHeaders.join(", ")}`]); return; }
     const parsed = lines.slice(1).map((line,i) => {
-      const vals = line.split(",").map(v=>v.trim().replace(/^"|"$/g,""));
+      const vals = line.split(",").map(v=>v.trim().replace(/^"|"$/g,"").replace(/\r/g,""));
       const row = {};
       headers.forEach((h,j) => row[h] = vals[j]||"");
+      // Normalize type casing for matching
+      if (row.type) row.type = RETAILER_TYPES.find(t=>t.toLowerCase()===row.type.toLowerCase()) || row.type;
       return { ...row, _line: i+2 };
     }).filter(r=>r.market&&r.retailer&&r.store_name);
     setRows(parsed);
@@ -1800,9 +1804,10 @@ export default function App() {
     const market = markets.find(m=>m.name.toLowerCase()===row.market.toLowerCase());
     if (!market) return;
     // Find or create retailer
+    const normalizedType = RETAILER_TYPES.find(t=>t.toLowerCase()===(row.type||"").toLowerCase()) || row.type || "Other";
     let retailer = retailers.find(r=>r.name.toLowerCase()===row.retailer.toLowerCase()&&r.market_id===market.id);
     if (!retailer) {
-      const [newRet] = await sbInsert("retailers", user.token, { name:row.retailer, type:row.type||"Other", market_id:market.id });
+      const [newRet] = await sbInsert("retailers", user.token, { name:row.retailer, type:normalizedType, market_id:market.id });
       if (newRet?.id) { retailer = newRet; setRetailers(p=>[...p, newRet]); }
     }
     if (!retailer) return;
