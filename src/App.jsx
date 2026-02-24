@@ -330,6 +330,9 @@ function TaskModal({ task, store, retailer, market, onClose, onSave, onDelete })
             </div>
           </div>
           <div style={{ marginBottom:18 }}>
+            <label style={labelSt}>Assigned to</label>
+            <input value={t.assignee||""} onChange={e=>setT({...t,assignee:e.target.value})} placeholder="Person's name…"
+              style={{...inputSt,width:"100%",boxSizing:"border-box",marginBottom:18}} />
             <label style={labelSt}>Notes</label>
             <textarea value={t.description||""} onChange={e=>setT({...t,description:e.target.value})} rows={3}
               style={{...inputSt,width:"100%",boxSizing:"border-box",resize:"vertical",lineHeight:1.6}} />
@@ -400,7 +403,7 @@ function AddTaskInline({ storeId, retailerId, color, onAdd }) {
 function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
   const [open,   setOpen]   = useState(true);
   const [adding, setAdding] = useState(false);
-  const [f,      setF]      = useState({ title:"", status:"todo", priority:"medium", due:"" });
+  const [f,      setF]      = useState({ title:"", status:"todo", priority:"medium", due:"", assignee:"" });
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
@@ -429,9 +432,10 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
           {tasks.length===0&&!adding&&<div style={{ padding:"12px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No account-level tasks yet</div>}
           {tasks.map((task,i)=>(
             <div key={task.id}
-              style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
+              style={{ display:"grid", gridTemplateColumns:"1fr 130px 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
               onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
               <span onClick={()=>onTaskClick(task)} style={{ fontWeight:600, fontSize:13, color:task.status==="done"?"#CBD5E1":"#1E293B", textDecoration:task.status==="done"?"line-through":"none", cursor:"pointer" }}>{task.title}</span>
+              <span style={{ fontSize:11, color:"#6366F1", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{task.assignee||<span style={{color:"#CBD5E1"}}>—</span>}</span>
               <StatusPill status={task.status} />
               <PriorityDot priority={task.priority} />
               <span style={{ fontSize:12, color:"#94A3B8" }}>{task.due||"—"}</span>
@@ -450,6 +454,7 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
                 {Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
               </select>
               <input type="date" value={f.due} onChange={e=>setF({...f,due:e.target.value})} style={inputSt}/>
+              <input value={f.assignee||""} onChange={e=>setF({...f,assignee:e.target.value})} placeholder="Assign to…" style={{...inputSt,flex:"0 1 130px"}}/>
               <button onClick={submit} disabled={saving} style={{...btnPri(market.color),opacity:saving?0.7:1}}>{saving?"…":"Add"}</button>
               <button onClick={()=>setAdding(false)} style={btnGhost}>✕</button>
             </div>
@@ -771,7 +776,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
           {view==="list" ? (
             <>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px", padding:"6px 14px", background:"#F8FAFC", borderBottom:"1px solid #E2E8F0" }}>
-                {["Task","Status","Priority","Due","",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
+                {["Task","Assignee","Status","Priority","Due","",""].map(h=><span key={h} style={{ fontSize:9, color:"#94A3B8", fontWeight:800, textTransform:"uppercase", letterSpacing:1 }}>{h}</span>)}
               </div>
               {myTasks.length===0&&<div style={{ padding:"14px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No tasks yet</div>}
               {myTasks.map((task,i)=>(
@@ -1902,7 +1907,7 @@ export default function App() {
     if (row?.id) setStores(p=>[...p, row]);
   };
 
-  const addTask = async ({ title, status, priority, due, description, comments, photos, retailerId, storeId }) => {
+  const addTask = async ({ title, status, priority, due, description, comments, photos, assignee, retailerId, storeId }) => {
     const [row] = await sbInsert("tasks", user.token, {
       title, status, priority,
       due: due||null,
@@ -1922,6 +1927,7 @@ export default function App() {
       due:         updated.due||null,
       description: updated.description||"",
       comments:    updated.comments||[],
+      assignee:    updated.assignee||"",
     });
     setTasks(p=>p.map(t=>t.id===updated.id?{...t,...updated}:t));
   };
