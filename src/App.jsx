@@ -979,7 +979,6 @@ function MarketSection({ market, retailers, stores, tasks, view, onTaskClick, on
           </div>
           <span style={{ color:"#CBD5E1", fontSize:12, marginLeft:4, display:"inline-block", transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
         </div>
-        </div>
         {isAdmin && !editingMkt && <>
           <button onClick={e=>{e.stopPropagation();setEditingMkt(true);setMktName(market.name);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px" }}>✏️</button>
           <button onClick={async e=>{e.stopPropagation();if(!window.confirm("Delete market '"+market.name+"' and ALL its data?"))return;await sbDelete("markets",token,market.id);onDeleteMarket&&onDeleteMarket(market.id);}} style={{ ...btnGhost, fontSize:11, padding:"4px 10px", color:"#DC2626", background:"#FEF2F2" }}>🗑</button>
