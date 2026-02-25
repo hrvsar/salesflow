@@ -432,7 +432,7 @@ function AccountTaskList({ tasks, market, retailer, onTaskClick, onAddTask }) {
           {tasks.length===0&&!adding&&<div style={{ padding:"12px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No account-level tasks yet</div>}
           {tasks.map((task,i)=>(
             <div key={task.id}
-              style={{ display:"grid", gridTemplateColumns:"1fr 130px 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
+              className="sf-task-row" style={{ display:"grid", gridTemplateColumns:"1fr 130px 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===tasks.length-1&&!adding?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
               onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <button onClick={async(e)=>{e.stopPropagation();const ns=task.status==="done"?"todo":"done";await onToggleDone(task.id,ns);}} style={{ width:20,height:20,borderRadius:"50%",border:task.status==="done"?"none":"2px solid #CBD5E1",background:task.status==="done"?"#16A34A":"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s" }}>
@@ -786,7 +786,7 @@ function StoreBlock({ store, retailer, market, tasks, view, onTaskClick, onAddTa
               {myTasks.length===0&&<div style={{ padding:"14px 16px", color:"#CBD5E1", fontSize:12, textAlign:"center" }}>No tasks yet</div>}
               {myTasks.map((task,i)=>(
                 <div key={task.id}
-                  style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
+                  className="sf-task-row" style={{ display:"grid", gridTemplateColumns:"1fr 110px 90px 100px 60px 32px", padding:"10px 14px", borderBottom:i===myTasks.length-1?"none":"1px solid #F1F5F9", transition:"background 0.12s", alignItems:"center" }}
                   onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <button onClick={async(e)=>{e.stopPropagation();const ns=task.status==="done"?"todo":"done";await onToggleDone(task.id,ns);}} style={{ width:20,height:20,borderRadius:"50%",border:task.status==="done"?"none":"2px solid #CBD5E1",background:task.status==="done"?"#16A34A":"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s" }}>
@@ -1088,9 +1088,9 @@ function AddMarketModal({ onClose, onAdd }) {
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout, isAdmin, onTeam, onImportCSV, onImportProducts }) {
+function Sidebar({ markets, retailers, stores, tasks, selected, onSelect, onAddMarket, userEmail, onLogout, isAdmin, onTeam, onImportCSV, onImportProducts, showMobileMenu, onCloseMobile }) {
   return (
-    <div style={{ width:210, minWidth:210, flexShrink:0, background:"#0F172A", display:"flex", flexDirection:"column", height:"100%", overflowY:"auto" }}>
+    <div className={"sf-sidebar" + (showMobileMenu ? " open" : "")} style={{ width:210, minWidth:210, flexShrink:0, background:"#0F172A", display:"flex", flexDirection:"column", height:"100%", overflowY:"auto" }}>
       <div style={{ padding:"18px 16px 16px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", gap:9 }}>
         <div style={{ width:32, height:32, borderRadius:9, background:"linear-gradient(135deg,#2563EB,#7C3AED)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>💼</div>
         <div style={{ minWidth:0 }}>
@@ -1801,6 +1801,7 @@ export default function App() {
   const [addingMkt,  setAddingMkt]  = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showTeam,   setShowTeam]   = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showCSV,    setShowCSV]    = useState(false);
   const [showProductsCSV, setShowProductsCSV] = useState(false);
   const [products,   setProducts]   = useState([]);
@@ -1985,15 +1986,37 @@ export default function App() {
 
   return (
     <div style={{ display:"flex", height:"100vh", fontFamily:"'DM Sans','Segoe UI',sans-serif", background:"#F1F5F9", overflow:"hidden" }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .sf-sidebar { position: fixed !important; left: 0; top: 0; bottom: 0; z-index: 200; transform: translateX(-100%); transition: transform 0.25s ease; width: 240px !important; min-width: 240px !important; }
+          .sf-sidebar.open { transform: translateX(0); }
+          .sf-main { margin-left: 0 !important; }
+          .sf-mobile-overlay { display: block !important; }
+          .sf-mobile-menu-btn { display: flex !important; }
+          .sf-stat-cards { grid-template-columns: 1fr 1fr !important; gap: 8px !important; padding: 12px 12px 0 !important; }
+          .sf-task-row { grid-template-columns: 1fr 80px 32px !important; }
+          .sf-task-row > span:nth-child(3),
+          .sf-task-row > span:nth-child(4),
+          .sf-task-row > span:nth-child(5) { display: none !important; }
+          .sf-task-row > *:nth-child(3),
+          .sf-task-row > *:nth-child(4),
+          .sf-task-row > *:nth-child(5) { display: none !important; }
+        }
+        .sf-mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+        .sf-mobile-menu-btn { display: none; }
+      `}</style>
+      {showMobileMenu && <div className="sf-mobile-overlay" onClick={()=>setShowMobileMenu(false)}/>}
       <Sidebar markets={allowedMarkets} retailers={retailers} stores={stores} tasks={visibleTasks}
         selected={selMarket} onSelect={setSelMarket}
         onAddMarket={isAdmin?()=>setAddingMkt(true):null}
         userEmail={user.email} onLogout={handleLogout}
-        isAdmin={isAdmin} onTeam={()=>setShowTeam(true)} onImportCSV={isAdmin?()=>setShowCSV(true):null} onImportProducts={isAdmin?()=>setShowProductsCSV(true):null}/>
+        isAdmin={isAdmin} onTeam={()=>setShowTeam(true)} onImportCSV={isAdmin?()=>setShowCSV(true):null} onImportProducts={isAdmin?()=>setShowProductsCSV(true):null}
+        showMobileMenu={showMobileMenu} onCloseMobile={()=>setShowMobileMenu(false)}/>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
         {/* Top bar */}
-        <div style={{ background:"#fff", borderBottom:"1px solid #E2E8F0", padding:"13px 24px", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
+        <div style={{ background:"#fff", borderBottom:"1px solid #E2E8F0", padding:"13px 16px", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
+          <button className="sf-mobile-menu-btn" onClick={()=>setShowMobileMenu(m=>!m)} style={{ background:"none", border:"1px solid #E2E8F0", cursor:"pointer", padding:"6px 10px", borderRadius:8, color:"#0F172A", fontSize:18, display:"none", alignItems:"center", justifyContent:"center", flexShrink:0 }}>☰</button>
           <div>
             <div style={{ fontWeight:900, fontSize:18, color:"#0F172A", letterSpacing:-0.4 }}>
               {selMarket?(allowedMarkets.find(m=>m.id===selMarket)?.flag+" "+allowedMarkets.find(m=>m.id===selMarket)?.name):"🌐 All Markets"}
@@ -2018,7 +2041,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div style={{ flex:1, overflowY:"auto", padding:"20px 24px" }}>
+        <div style={{ flex:1, overflowY:"auto", padding:"16px" }}>
           {loading ? <Spinner/> : (
             <>
               <StatsStrip tasks={visibleTasks}/>
